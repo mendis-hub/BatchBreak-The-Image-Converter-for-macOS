@@ -8,6 +8,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import ImageIO
+import PDFKit
 
 struct PhotoItem: Identifiable, Hashable, Sendable {
     let id: UUID
@@ -15,17 +16,19 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
     let name: String
     let fileExtension: String
     let fileSize: Int64
+    let pageCount: Int
     let pixelWidth: Int?
     let pixelHeight: Int?
     var thumbnail: NSImage?
     let bookmarkData: Data?
     
-    init(
+    nonisolated init(
         id: UUID = UUID(),
         url: URL,
         name: String,
         fileExtension: String,
         fileSize: Int64,
+        pageCount: Int = 1,
         pixelWidth: Int? = nil,
         pixelHeight: Int? = nil,
         thumbnail: NSImage? = nil,
@@ -36,6 +39,7 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         self.name = name
         self.fileExtension = fileExtension
         self.fileSize = fileSize
+        self.pageCount = pageCount
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
         self.thumbnail = thumbnail
@@ -50,14 +54,14 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         hasher.combine(id)
     }
     
-    var formattedSize: String {
+    nonisolated var formattedSize: String {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useMB, .useKB, .useBytes]
         formatter.countStyle = .file
         return formatter.string(fromByteCount: fileSize)
     }
     
-    func estimatedOutputSize(format: OutputFormat, quality: Double) -> Int64 {
+    nonisolated func estimatedOutputSize(format: OutputFormat, quality: Double) -> Int64 {
         let uppercasedExt = fileExtension.uppercased()
         
         // Direct match for lossless formats when input and output match
@@ -67,12 +71,15 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         if (uppercasedExt == "TIFF" || uppercasedExt == "TIF") && format == .tiff {
             return fileSize
         }
+        if uppercasedExt == "PDF" && format == .pdf {
+            return fileSize
+        }
         
         let pixels: Double
         if let w = pixelWidth, let h = pixelHeight, w > 0, h > 0 {
             pixels = Double(w * h)
         } else {
-            let isInputLossless = ["PNG", "TIFF", "TIF", "BMP"].contains(uppercasedExt)
+            let isInputLossless = ["PNG", "TIFF", "TIF", "BMP", "PSD", "PDF"].contains(uppercasedExt)
             let bytesPerPixelInput = isInputLossless ? 0.575 : 0.12
             pixels = max(1000.0, Double(fileSize) / bytesPerPixelInput)
         }
@@ -80,31 +87,34 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         let estimatedBytes: Double
         switch format {
         case .jpeg:
-            // JPEG bytes per pixel ranges from ~0.03 at low quality to ~0.41 at max quality
             let bpp = 0.03 + 0.38 * pow(quality, 1.7)
             estimatedBytes = pixels * bpp
         case .png:
-            // PNG bytes per pixel scaling dynamically with quality slider (~0.575 at 60% quality -> 70 MB)
             let bpp = 0.32 + 0.55 * pow(quality, 1.5)
             estimatedBytes = pixels * bpp
         case .heic:
-            // HEIC high-efficiency compression, ~50% smaller than JPEG
             let bpp = 0.015 + 0.19 * pow(quality, 1.7)
             estimatedBytes = pixels * bpp
         case .webp:
-            // WEBP lossy compression, ~25% smaller than JPEG
             let bpp = 0.02 + 0.26 * pow(quality, 1.7)
             estimatedBytes = pixels * bpp
         case .tiff:
-            // TIFF compression estimate scaling with quality
             let bpp = 1.5 + 2.0 * quality
+            estimatedBytes = pixels * bpp
+        case .pdf:
+            let bpp = 0.35 + 0.50 * pow(quality, 1.5)
             estimatedBytes = pixels * bpp
         }
         
-        return max(1024, Int64(round(estimatedBytes)))
+        let singlePageEstimate = max(1024, Int64(round(estimatedBytes)))
+        if format == .pdf {
+            return singlePageEstimate
+        } else {
+            return singlePageEstimate * Int64(max(pageCount, 1))
+        }
     }
     
-    func formattedEstimatedSize(format: OutputFormat, quality: Double) -> String {
+    nonisolated func formattedEstimatedSize(format: OutputFormat, quality: Double) -> String {
         let bytes = estimatedOutputSize(format: format, quality: quality)
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useMB, .useKB, .useBytes]
@@ -112,7 +122,7 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         return formatter.string(fromByteCount: bytes)
     }
     
-    func withSecurityScopedAccess<T>(_ action: () throws -> T) rethrows -> T {
+    nonisolated func withSecurityScopedAccess<T>(_ action: () throws -> T) rethrows -> T {
         var isStale = false
         let rootURL = bookmarkData.flatMap { data in
             (try? URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale))
@@ -127,7 +137,7 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         return try action()
     }
     
-    static func from(url: URL, bookmarkData: Data? = nil) -> PhotoItem {
+    nonisolated static func from(url: URL, bookmarkData: Data? = nil) -> PhotoItem {
         var isStale = false
         let rootURL = bookmarkData.flatMap { data in
             (try? URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale))
@@ -144,9 +154,10 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         let ext = url.pathExtension.uppercased()
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) } ?? 0
         
-        // Extract resolution safely from image header
         var width: Int? = nil
         var height: Int? = nil
+        var pageCount = 1
+        
         if let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
            let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any] {
             if let w = properties[kCGImagePropertyPixelWidth] {
@@ -157,18 +168,30 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
             }
         }
         
+        if ext == "PDF" {
+            if let pdfDoc = PDFDocument(url: url) {
+                pageCount = max(pdfDoc.pageCount, 1)
+                if let page = pdfDoc.page(at: 0) {
+                    let bounds = page.bounds(for: .mediaBox)
+                    width = Int(bounds.width * 2.0)
+                    height = Int(bounds.height * 2.0)
+                }
+            }
+        }
+        
         return PhotoItem(
             url: url,
             name: name.isEmpty ? "Photo" : name,
             fileExtension: ext.isEmpty ? "IMG" : ext,
             fileSize: size,
+            pageCount: pageCount,
             pixelWidth: width,
             pixelHeight: height,
             bookmarkData: bookmarkData
         )
     }
     
-    static func scanForImages(in url: URL) -> [URL] {
+    nonisolated static func scanForImages(in url: URL) -> [URL] {
         let accessing = url.startAccessingSecurityScopedResource()
         defer {
             if accessing {
@@ -188,7 +211,7 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                     return []
                 }
                 var imageURLs: [URL] = []
-                let validExtensions = ["jpg", "jpeg", "png", "heic", "heif", "webp", "tiff", "bmp", "gif"]
+                let validExtensions = ["jpg", "jpeg", "png", "heic", "heif", "webp", "tiff", "bmp", "gif", "pdf", "psd"]
                 for case let fileURL as URL in enumerator {
                     if validExtensions.contains(fileURL.pathExtension.lowercased()) {
                         imageURLs.append(fileURL)
@@ -196,7 +219,7 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                 }
                 return imageURLs
             } else {
-                let validExtensions = ["jpg", "jpeg", "png", "heic", "heif", "webp", "tiff", "bmp", "gif"]
+                let validExtensions = ["jpg", "jpeg", "png", "heic", "heif", "webp", "tiff", "bmp", "gif", "pdf", "psd"]
                 if validExtensions.contains(url.pathExtension.lowercased()) {
                     return [url]
                 }
@@ -205,9 +228,14 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         return []
     }
     
-    func loadThumbnailAsync(targetSize: CGSize = CGSize(width: 320, height: 320), completion: @escaping @Sendable (NSImage?) -> Void) {
+    nonisolated func loadThumbnailAsync(targetSize: CGSize = CGSize(width: 320, height: 320), completion: @escaping @Sendable (NSImage?) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             let img = self.withSecurityScopedAccess { () -> NSImage? in
+                if self.fileExtension.lowercased() == "pdf" {
+                    if let pdfDoc = PDFDocument(url: self.url), let page = pdfDoc.page(at: 0) {
+                        return page.thumbnail(of: targetSize, for: .mediaBox)
+                    }
+                }
                 if let imageSource = CGImageSourceCreateWithURL(self.url as CFURL, nil) {
                     let maxPixelSize = max(targetSize.width, targetSize.height) * 2
                     let options: [CFString: Any] = [
@@ -232,20 +260,22 @@ enum OutputFormat: String, CaseIterable, Identifiable, Sendable {
     case heic = "HEIC"
     case webp = "WEBP"
     case tiff = "TIFF"
+    case pdf = "PDF"
     
-    var id: String { rawValue }
+    nonisolated var id: String { rawValue }
     
-    var extensionName: String {
+    nonisolated var extensionName: String {
         switch self {
         case .jpeg: return "jpg"
         case .png: return "png"
         case .heic: return "heic"
         case .webp: return "webp"
         case .tiff: return "tiff"
+        case .pdf: return "pdf"
         }
     }
     
-    var utiIdentifier: CFString {
+    nonisolated var utiIdentifier: CFString {
         switch self {
         case .jpeg: return UTType.jpeg.identifier as CFString
         case .png: return UTType.png.identifier as CFString
@@ -256,6 +286,7 @@ enum OutputFormat: String, CaseIterable, Identifiable, Sendable {
             }
             return "org.webmproject.webp" as CFString
         case .tiff: return UTType.tiff.identifier as CFString
+        case .pdf: return UTType.pdf.identifier as CFString
         }
     }
 }

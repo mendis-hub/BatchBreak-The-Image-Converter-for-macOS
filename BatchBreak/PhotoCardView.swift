@@ -86,7 +86,7 @@ struct PhotoCardView: View {
                 }
                 
                 // Small file format indicator on the left bottom of photo
-                Text(item.fileExtension)
+                Text(item.pageCount > 1 ? "\(item.fileExtension) · \(item.pageCount) pgs" : item.fileExtension)
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.black.opacity(0.85))
                     .padding(.horizontal, 7)
@@ -125,7 +125,9 @@ struct PhotoCardView: View {
         .onAppear {
             if loadedImage == nil {
                 item.loadThumbnailAsync(targetSize: CGSize(width: 320, height: 320)) { img in
-                    self.loadedImage = img
+                    Task { @MainActor in
+                        self.loadedImage = img
+                    }
                 }
             }
         }

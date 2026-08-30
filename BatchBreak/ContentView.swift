@@ -8,6 +8,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
+import PDFKit
 
 enum ViewMode {
     case grid
@@ -41,6 +42,17 @@ struct ContentView: View {
     private let gridColumns = [
         GridItem(.adaptive(minimum: 140, maximum: 200), spacing: 20)
     ]
+    
+    private var allowedContentTypes: [UTType] {
+        var types: [UTType] = [.image, .pdf, .folder]
+        if let psdType = UTType(filenameExtension: "psd") {
+            types.append(psdType)
+        }
+        if let adobePsdType = UTType("com.adobe.photoshop-image") {
+            types.append(adobePsdType)
+        }
+        return types
+    }
     
     var body: some View {
         ZStack {
@@ -126,7 +138,7 @@ struct ContentView: View {
         }
         .fileImporter(
             isPresented: $isShowingFileImporter,
-            allowedContentTypes: [.image, .folder],
+            allowedContentTypes: allowedContentTypes,
             allowsMultipleSelection: true
         ) { result in
             switch result {
@@ -487,7 +499,7 @@ struct ContentView: View {
                     .font(.system(size: 26, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
                 
-                Text("Drag in photos or a whole folder, then convert them.")
+                Text("Drag in files or a whole folder, then convert them.")
                     .font(.system(size: 14, weight: .regular))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -614,7 +626,7 @@ struct ContentView: View {
                     ext: targetFormat.extensionName
                 )
                 
-                let success = await processConversion(
+                let outputBytes = await processConversion(
                     item: item,
                     destinationFolder: destinationFolder,
                     destinationBookmark: destinationBookmark,
@@ -623,10 +635,9 @@ struct ContentView: View {
                     quality: targetQuality
                 )
                 
-                if success {
+                if outputBytes > 0 {
                     successfulConversions += 1
-                    let outSize = (try? destURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) }
-                    totalOut += outSize ?? item.estimatedOutputSize(format: targetFormat, quality: targetQuality)
+                    totalOut += outputBytes
                 }
                 
                 await MainActor.run {
@@ -661,6 +672,10 @@ struct ContentView: View {
     }
     
     private func getUniqueDestinationURL(in folder: URL, baseName: String, ext: String) -> URL {
+        return Self.getUniqueDestinationURLStatic(in: folder, baseName: baseName, ext: ext)
+    }
+    
+    nonisolated private static func getUniqueDestinationURLStatic(in folder: URL, baseName: String, ext: String) -> URL {
         var destination = folder.appendingPathComponent("\(baseName).\(ext)")
         var counter = 1
         let fm = FileManager.default
@@ -671,6 +686,97 @@ struct ContentView: View {
         return destination
     }
     
+    nonisolated private static func renderPDFPageToCGImage(page: PDFPage, scale: CGFloat = 2.0) -> CGImage? {
+        let bounds = page.bounds(for: .mediaBox)
+        let width = max(Int(bounds.width * scale), 1)
+        let height = max(Int(bounds.height * scale), 1)
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        
+        context.setFillColor(CGColor(gray: 1.0, alpha: 1.0))
+        context.fill(CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+        
+        context.saveGState()
+        context.scaleBy(x: scale, y: scale)
+        page.draw(with: .mediaBox, to: context)
+        context.restoreGState()
+        
+        return context.makeImage()
+    }
+    
+    nonisolated private static func decodeImage(from sourceURL: URL) -> CGImage? {
+        if let imageSource = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
+           let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) {
+            return cgImage
+        }
+        if let inputData = try? Data(contentsOf: sourceURL) {
+            if let imageSource = CGImageSourceCreateWithData(inputData as CFData, nil),
+               let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) {
+                return cgImage
+            }
+            if let nsImage = NSImage(data: inputData) {
+                var rect = CGRect(origin: .zero, size: nsImage.size)
+                return nsImage.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+            }
+        }
+        return nil
+    }
+    
+    nonisolated private static func writeImage(cgImage: CGImage, format: OutputFormat, quality: Double, to destURL: URL) -> Int64 {
+        let uti = format.utiIdentifier
+        let outputData = NSMutableData()
+        if let destinationData = CGImageDestinationCreateWithData(outputData as CFMutableData, uti, 1, nil) {
+            var options: [CFString: Any] = [:]
+            if format == .jpeg || format == .heic {
+                options[kCGImageDestinationLossyCompressionQuality] = quality
+            }
+            CGImageDestinationAddImage(destinationData, cgImage, options as CFDictionary)
+            if CGImageDestinationFinalize(destinationData) {
+                do {
+                    let data = outputData as Data
+                    try data.write(to: destURL)
+                    return Int64(data.count)
+                } catch {
+                    print("BatchBreak Error writing output data to \(destURL.path): \(error)")
+                }
+            }
+        }
+        
+        // Fallback via NSBitmapImageRep representation
+        let rep = NSBitmapImageRep(cgImage: cgImage)
+        let fileData: Data?
+        switch format {
+        case .jpeg, .heic, .webp:
+            fileData = rep.representation(using: .jpeg, properties: [.compressionFactor: quality])
+        case .png:
+            fileData = rep.representation(using: .png, properties: [:])
+        case .tiff:
+            fileData = rep.representation(using: .tiff, properties: [:])
+        case .pdf:
+            fileData = nil
+        }
+        
+        if let fileData = fileData {
+            do {
+                try fileData.write(to: destURL)
+                return Int64(fileData.count)
+            } catch {
+                print("BatchBreak Fallback Error writing file to \(destURL.path): \(error)")
+            }
+        }
+        return 0
+    }
+    
     private func processConversion(
         item: PhotoItem,
         destinationFolder: URL,
@@ -678,7 +784,7 @@ struct ContentView: View {
         destURL: URL,
         format: OutputFormat,
         quality: Double
-    ) async -> Bool {
+    ) async -> Int64 {
         return await Task.detached(priority: .userInitiated) {
             var isStale = false
             let resolvedFolder = destinationBookmark.flatMap { data in
@@ -697,72 +803,90 @@ struct ContentView: View {
                 }
             }
             
-            return item.withSecurityScopedAccess { () -> Bool in
+            return item.withSecurityScopedAccess { () -> Int64 in
                 let sourceURL = item.url
+                let isInputPDF = item.fileExtension.lowercased() == "pdf"
                 
-                // 1. Read / Decode CGImage
-                var cgImage: CGImage? = nil
-                if let imageSource = CGImageSourceCreateWithURL(sourceURL as CFURL, nil) {
-                    cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
-                }
-                
-                if cgImage == nil, let inputData = try? Data(contentsOf: sourceURL) {
-                    if let imageSource = CGImageSourceCreateWithData(inputData as CFData, nil) {
-                        cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
-                    }
-                    if cgImage == nil, let nsImage = NSImage(data: inputData) {
-                        var rect = CGRect(origin: .zero, size: nsImage.size)
-                        cgImage = nsImage.cgImage(forProposedRect: &rect, context: nil, hints: nil)
-                    }
-                }
-                
-                guard let finalCGImage = cgImage else {
-                    print("BatchBreak Error: Failed to decode image from \(sourceURL.path)")
-                    return false
-                }
-                
-                // 2. Encode to Data using CGImageDestinationCreateWithData (avoids ImageIO .sb-xxxx temp file sandbox errors)
-                let uti = format.utiIdentifier
-                let outputData = NSMutableData()
-                if let destinationData = CGImageDestinationCreateWithData(outputData as CFMutableData, uti, 1, nil) {
-                    var options: [CFString: Any] = [:]
-                    if format == .jpeg || format == .heic {
-                        options[kCGImageDestinationLossyCompressionQuality] = quality
-                    }
-                    CGImageDestinationAddImage(destinationData, finalCGImage, options as CFDictionary)
-                    if CGImageDestinationFinalize(destinationData) {
-                        do {
-                            try (outputData as Data).write(to: destURL)
-                            return true
-                        } catch {
-                            print("BatchBreak Error writing output data to \(destURL.path): \(error)")
+                // CASE 1: Exporting to PDF format
+                if format == .pdf {
+                    if isInputPDF, let pdfDoc = PDFDocument(url: sourceURL) {
+                        let pdfData = NSMutableData()
+                        if let consumer = CGDataConsumer(data: pdfData as CFMutableData),
+                           let firstPage = pdfDoc.page(at: 0) {
+                            var mediaBox = firstPage.bounds(for: .mediaBox)
+                            if let pdfContext = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) {
+                                for i in 0..<pdfDoc.pageCount {
+                                    if let page = pdfDoc.page(at: i) {
+                                        var pageMediaBox = page.bounds(for: .mediaBox)
+                                        pdfContext.beginPDFPage([kCGPDFContextMediaBox as String: NSData(bytes: &pageMediaBox, length: MemoryLayout<CGRect>.size)] as CFDictionary)
+                                        pdfContext.saveGState()
+                                        page.draw(with: .mediaBox, to: pdfContext)
+                                        pdfContext.restoreGState()
+                                        pdfContext.endPDFPage()
+                                    }
+                                }
+                                pdfContext.closePDF()
+                                do {
+                                    let data = pdfData as Data
+                                    try data.write(to: destURL)
+                                    return Int64(data.count)
+                                } catch {
+                                    print("BatchBreak Error writing PDF output to \(destURL.path): \(error)")
+                                }
+                            }
+                        }
+                    } else if let cgImage = Self.decodeImage(from: sourceURL) {
+                        let pdfData = NSMutableData()
+                        var mediaBox = CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height)
+                        if let consumer = CGDataConsumer(data: pdfData as CFMutableData),
+                           let pdfContext = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) {
+                            pdfContext.beginPDFPage(nil)
+                            pdfContext.draw(cgImage, in: mediaBox)
+                            pdfContext.endPDFPage()
+                            pdfContext.closePDF()
+                            do {
+                                let data = pdfData as Data
+                                try data.write(to: destURL)
+                                return Int64(data.count)
+                            } catch {
+                                print("BatchBreak Error writing PDF output to \(destURL.path): \(error)")
+                            }
                         }
                     }
+                    return 0
                 }
                 
-                // 3. Fallback via NSBitmapImageRep representation to Data, then Data.write
-                let rep = NSBitmapImageRep(cgImage: finalCGImage)
-                let fileData: Data?
-                switch format {
-                case .jpeg, .heic, .webp:
-                    fileData = rep.representation(using: .jpeg, properties: [.compressionFactor: quality])
-                case .png:
-                    fileData = rep.representation(using: .png, properties: [:])
-                case .tiff:
-                    fileData = rep.representation(using: .tiff, properties: [:])
-                }
-                
-                if let fileData = fileData {
-                    do {
-                        try fileData.write(to: destURL)
-                        return true
-                    } catch {
-                        print("BatchBreak Fallback Error writing file to \(destURL.path): \(error)")
-                        return false
+                // CASE 2: Exporting to non-PDF Image format (JPEG, PNG, HEIC, WEBP, TIFF)
+                if isInputPDF, let pdfDoc = PDFDocument(url: sourceURL) {
+                    let pageCount = pdfDoc.pageCount
+                    var totalBytesWritten: Int64 = 0
+                    
+                    for pageIndex in 0..<pageCount {
+                        guard let page = pdfDoc.page(at: pageIndex),
+                              let cgImage = Self.renderPDFPageToCGImage(page: page) else { continue }
+                        
+                        let targetURL: URL
+                        if pageCount > 1 {
+                            targetURL = Self.getUniqueDestinationURLStatic(
+                                in: destinationFolder,
+                                baseName: "\(item.name)_Page_\(pageIndex + 1)",
+                                ext: format.extensionName
+                            )
+                        } else {
+                            targetURL = destURL
+                        }
+                        
+                        let bytes = Self.writeImage(cgImage: cgImage, format: format, quality: quality, to: targetURL)
+                        totalBytesWritten += bytes
                     }
+                    return totalBytesWritten
+                } else {
+                    guard let cgImage = Self.decodeImage(from: sourceURL) else {
+                        print("BatchBreak Error: Failed to decode image from \(sourceURL.path)")
+                        return 0
+                    }
+                    return Self.writeImage(cgImage: cgImage, format: format, quality: quality, to: destURL)
                 }
-                
-                return false
             }
         }.value
     }
@@ -885,7 +1009,7 @@ struct PhotoListRowView: View {
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 
-                Text(item.fileExtension)
+                Text(item.pageCount > 1 ? "\(item.fileExtension) · \(item.pageCount) pgs" : item.fileExtension)
                     .font(.system(size: 8, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.black.opacity(0.85))
                     .padding(.horizontal, 4)
@@ -932,7 +1056,9 @@ struct PhotoListRowView: View {
         .onAppear {
             if loadedImage == nil {
                 item.loadThumbnailAsync(targetSize: CGSize(width: 112, height: 112)) { img in
-                    self.loadedImage = img
+                    Task { @MainActor in
+                        self.loadedImage = img
+                    }
                 }
             }
         }
