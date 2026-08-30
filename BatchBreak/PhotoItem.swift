@@ -15,6 +15,8 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
     let name: String
     let fileExtension: String
     let fileSize: Int64
+    let pixelWidth: Int?
+    let pixelHeight: Int?
     var thumbnail: NSImage?
     let bookmarkData: Data?
     
@@ -24,6 +26,8 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         name: String,
         fileExtension: String,
         fileSize: Int64,
+        pixelWidth: Int? = nil,
+        pixelHeight: Int? = nil,
         thumbnail: NSImage? = nil,
         bookmarkData: Data? = nil
     ) {
@@ -32,6 +36,8 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         self.name = name
         self.fileExtension = fileExtension
         self.fileSize = fileSize
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
         self.thumbnail = thumbnail
         self.bookmarkData = bookmarkData
     }
@@ -52,20 +58,48 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
     }
     
     func estimatedOutputSize(format: OutputFormat, quality: Double) -> Int64 {
-        let multiplier: Double
+        let uppercasedExt = fileExtension.uppercased()
+        
+        // Direct match for lossless formats when input and output match
+        if uppercasedExt == "PNG" && format == .png {
+            return fileSize
+        }
+        if (uppercasedExt == "TIFF" || uppercasedExt == "TIF") && format == .tiff {
+            return fileSize
+        }
+        
+        let pixels: Double
+        if let w = pixelWidth, let h = pixelHeight, w > 0, h > 0 {
+            pixels = Double(w * h)
+        } else {
+            let isInputLossless = ["PNG", "TIFF", "TIF", "BMP"].contains(uppercasedExt)
+            let bytesPerPixelInput = isInputLossless ? 0.66 : 0.12
+            pixels = max(1000.0, Double(fileSize) / bytesPerPixelInput)
+        }
+        
+        let estimatedBytes: Double
         switch format {
         case .jpeg:
-            multiplier = 0.2 + (quality * 0.7)
+            // JPEG bytes per pixel ranges from ~0.04 at low quality to ~0.45 at max quality
+            let bpp = 0.03 + 0.38 * pow(quality, 1.7)
+            estimatedBytes = pixels * bpp
         case .png:
-            multiplier = 0.85
+            // PNG photographic encoding via ImageIO (24-bit RGB DEFLATE) averages ~0.66 bytes per pixel
+            estimatedBytes = pixels * 0.66
         case .heic:
-            multiplier = 0.15 + (quality * 0.5)
+            // HEIC is modern high-efficiency compression, ~50% smaller than JPEG
+            let bpp = 0.015 + 0.19 * pow(quality, 1.7)
+            estimatedBytes = pixels * bpp
         case .webp:
-            multiplier = 0.18 + (quality * 0.55)
+            // WEBP lossy compression, ~25% smaller than JPEG
+            let bpp = 0.02 + 0.26 * pow(quality, 1.7)
+            estimatedBytes = pixels * bpp
         case .tiff:
-            multiplier = 1.2
+            // Uncompressed/light LZW TIFF (~3.0 bytes per pixel)
+            estimatedBytes = pixels * 3.0
         }
-        return Int64(Double(fileSize) * multiplier)
+        
+        return max(1024, Int64(round(estimatedBytes)))
     }
     
     func formattedEstimatedSize(format: OutputFormat, quality: Double) -> String {
@@ -107,11 +141,27 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         let name = url.deletingPathExtension().lastPathComponent
         let ext = url.pathExtension.uppercased()
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) } ?? 0
+        
+        // Extract resolution safely from image header
+        var width: Int? = nil
+        var height: Int? = nil
+        if let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
+           let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any] {
+            if let w = properties[kCGImagePropertyPixelWidth] {
+                width = (w as? NSNumber)?.intValue ?? (w as? Int)
+            }
+            if let h = properties[kCGImagePropertyPixelHeight] {
+                height = (h as? NSNumber)?.intValue ?? (h as? Int)
+            }
+        }
+        
         return PhotoItem(
             url: url,
             name: name.isEmpty ? "Photo" : name,
             fileExtension: ext.isEmpty ? "IMG" : ext,
             fileSize: size,
+            pixelWidth: width,
+            pixelHeight: height,
             bookmarkData: bookmarkData
         )
     }

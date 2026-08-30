@@ -31,6 +31,8 @@ struct ContentView: View {
     @State private var lastConvertedCount: Int = 0
     @State private var lastSavedText: String = ""
     @State private var lastSavedPercentage: Int = 0
+    @State private var isSizeIncreased: Bool = false
+    @State private var isConversionCompleted: Bool = false
     @State private var lastDestinationFolder: URL? = nil
     
     @Environment(\.colorScheme) private var colorScheme
@@ -68,7 +70,7 @@ struct ContentView: View {
                                     }
                                 }
                                 .padding(.horizontal, 24)
-                                .padding(.top, 90)
+                                .padding(.top, 80)
                                 .padding(.bottom, 56)
                             } else {
                                 LazyVStack(spacing: 10) {
@@ -83,7 +85,7 @@ struct ContentView: View {
                                     }
                                 }
                                 .padding(.horizontal, 24)
-                                .padding(.top, 90)
+                                .padding(.top, 80)
                                 .padding(.bottom, 56)
                             }
                         }
@@ -164,6 +166,7 @@ struct ContentView: View {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             photos.removeAll()
                             showSummaryToast = false
+                            isConversionCompleted = false
                         }
                     }) {
                         Text("Clear")
@@ -253,9 +256,15 @@ struct ContentView: View {
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(.primary)
                 
-                Text("Saved \(lastSavedText) · \(lastSavedPercentage)% smaller")
-                    .font(.system(size: 12, weight: .regular, design: .rounded))
-                    .foregroundStyle(.secondary)
+                if isSizeIncreased {
+                    Text("Size increased by \(lastSavedText) (+\(lastSavedPercentage)%)")
+                        .font(.system(size: 12, weight: .regular, design: .rounded))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Saved \(lastSavedText) · \(lastSavedPercentage)% smaller")
+                        .font(.system(size: 12, weight: .regular, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.trailing, 6)
             
@@ -300,27 +309,30 @@ struct ContentView: View {
     
     // MARK: - Conversion Progress Toast
     private var conversionProgressToast: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             ProgressView()
                 .controlSize(.small)
             
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Converting \(convertedCount) of \(totalConversionCount) photos...")
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Converting \(convertedCount) of \(totalConversionCount)")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(.primary)
+                    .lineLimit(1)
                 
-                ProgressView(value: Double(convertedCount), total: Double(max(totalConversionCount, 1)))
-                    .progressViewStyle(.linear)
-                    .frame(width: 140)
+                HStack(spacing: 8) {
+                    ProgressView(value: Double(convertedCount), total: Double(max(totalConversionCount, 1)))
+                        .progressViewStyle(.linear)
+                        .frame(width: 110)
+                    
+                    Text("\(Int((Double(convertedCount) / Double(max(totalConversionCount, 1))) * 100))%")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
             }
-            
-            Text("\(Int((Double(convertedCount) / Double(max(totalConversionCount, 1))) * 100))%")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
         .glassEffect(.regular, in: Capsule())
         .shadow(color: Color.black.opacity(0.16), radius: 12, x: 0, y: 4)
         .overlay(
@@ -358,7 +370,10 @@ struct ContentView: View {
                 
                 QualitySlider(value: $quality)
                     .onChange(of: quality) { _, _ in
-                        showSummaryToast = false
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showSummaryToast = false
+                            isConversionCompleted = false
+                        }
                     }
                 
                 Text("\(Int(quality * 100))%")
@@ -383,8 +398,11 @@ struct ContentView: View {
                 Menu {
                     ForEach(OutputFormat.allCases) { format in
                         Button(action: {
-                            selectedOutputFormat = format
-                            showSummaryToast = false
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                selectedOutputFormat = format
+                                showSummaryToast = false
+                                isConversionCompleted = false
+                            }
                         }) {
                             if selectedOutputFormat == format {
                                 Label(format.rawValue, systemImage: "checkmark")
@@ -416,7 +434,7 @@ struct ContentView: View {
                     if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                 }
                 
-                // Convert Button matching top glass capsule buttons
+                // Convert Button (Dimmed and unclickable when conversion completes; re-enables on format/quality change)
                 Button(action: convertPhotos) {
                     HStack(spacing: 6) {
                         if isConverting {
@@ -431,9 +449,15 @@ struct ContentView: View {
                 }
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.capsule)
-                .disabled(isConverting || photos.isEmpty)
+                .disabled(isConverting || photos.isEmpty || isConversionCompleted)
+                .opacity(isConversionCompleted ? 0.55 : 1.0)
+                .animation(.easeInOut(duration: 0.2), value: isConversionCompleted)
                 .onHover { inside in
-                    if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                    if inside && !isConverting && !photos.isEmpty && !isConversionCompleted {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
                 }
             }
         }
@@ -504,7 +528,10 @@ struct ContentView: View {
     }
     
     private func addFiles(urls: [URL]) {
-        showSummaryToast = false
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showSummaryToast = false
+            isConversionCompleted = false
+        }
         var newPhotos: [PhotoItem] = []
         for url in urls {
             let accessing = url.startAccessingSecurityScopedResource()
@@ -528,8 +555,9 @@ struct ContentView: View {
     }
     
     private func removePhoto(_ item: PhotoItem) {
-        showSummaryToast = false
         withAnimation(.easeInOut(duration: 0.2)) {
+            showSummaryToast = false
+            isConversionCompleted = false
             photos.removeAll(where: { $0.id == item.id })
         }
     }
@@ -569,6 +597,7 @@ struct ContentView: View {
                     convertedCount = 0
                     totalConversionCount = photosToConvert.count
                     showSummaryToast = false
+                    isConversionCompleted = false
                 }
             }
             
@@ -607,22 +636,25 @@ struct ContentView: View {
                 }
             }
             
-            let saved = max(0, totalOrig - totalOut)
-            let percentage = totalOrig > 0 ? Int(round((Double(saved) / Double(totalOrig)) * 100.0)) : 0
+            let isIncreased = totalOut > totalOrig
+            let diffBytes = abs(totalOrig - totalOut)
+            let percentage = totalOrig > 0 ? Int(round((Double(diffBytes) / Double(totalOrig)) * 100.0)) : 0
             
             let formatter = ByteCountFormatter()
             formatter.allowedUnits = [.useMB, .useKB, .useBytes]
             formatter.countStyle = .file
-            let savedFormattedText = formatter.string(fromByteCount: saved)
+            let diffFormattedText = formatter.string(fromByteCount: diffBytes)
             
             await MainActor.run {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
                     isConverting = false
                     lastConvertedCount = successfulConversions
-                    lastSavedText = savedFormattedText
+                    lastSavedText = diffFormattedText
                     lastSavedPercentage = percentage
+                    isSizeIncreased = isIncreased
                     lastDestinationFolder = destinationFolder
                     showSummaryToast = true
+                    isConversionCompleted = true
                 }
             }
         }
