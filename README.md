@@ -29,12 +29,6 @@ Convert hundreds of images at once to JPEG, PNG, HEIC, WEBP, TIFF, or PDF. Just 
 
 ---
 
-## Screenshots
-
-> _Add screenshots here after your first build._
-
----
-
 ## Requirements
 
 | | Minimum |
@@ -44,21 +38,6 @@ Convert hundreds of images at once to JPEG, PNG, HEIC, WEBP, TIFF, or PDF. Just 
 | **Swift** | 6 |
 
 > **Note:** `glassEffect` and `.glassProminent` button styles require **macOS 26 (Tahoe)** or later.
-
----
-
-## Getting Started
-
-```bash
-# Clone the repository
-git clone https://github.com/your-username/BatchBreak.git
-cd BatchBreak
-
-# Open in Xcode
-open BatchBreak.xcodeproj
-```
-
-Build and run the `BatchBreak` scheme on your Mac. No external dependencies or package manager setup needed.
 
 ---
 
