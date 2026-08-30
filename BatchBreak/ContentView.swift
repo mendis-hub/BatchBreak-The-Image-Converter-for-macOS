@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var photos: [PhotoItem] = []
     @State private var isTargeted: Bool = false
     @State private var isShowingFileImporter: Bool = false
+    @State private var isShowingAboutSheet: Bool = false
     @State private var viewMode: ViewMode = .grid
     @State private var quality: Double = 0.60
     @State private var selectedOutputFormat: OutputFormat = .jpeg
@@ -147,6 +148,12 @@ struct ContentView: View {
             case .failure(let error):
                 print("Error picking files: \(error.localizedDescription)")
             }
+        }
+        .sheet(isPresented: $isShowingAboutSheet) {
+            AboutView()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showAboutSheet)) { _ in
+            isShowingAboutSheet = true
         }
     }
     
@@ -488,36 +495,56 @@ struct ContentView: View {
     
     // MARK: - Empty State View
     private var emptyStateView: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 20) {
             Spacer()
             
-            HeaderCardStack(isTargeted: isTargeted)
-                .padding(.bottom, 12)
+            MinimalHeroVisual(isTargeted: isTargeted) {
+                isShowingFileImporter = true
+            }
             
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 Text("Drop your files here")
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
                 
-                Text("Drag in files or a whole folder, then convert them.")
-                    .font(.system(size: 14, weight: .regular))
+                Text("Drag in images or folders to batch convert.")
+                    .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 440)
             }
             
-            Button(action: {
-                isShowingFileImporter = true
-            }) {
-                Text("Add Files...")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.capsule)
-            .onHover { inside in
-                if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            VStack(spacing: 12) {
+                Button(action: {
+                    isShowingFileImporter = true
+                }) {
+                    Text("Add Files...")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 7)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.capsule)
+                .onHover { inside in
+                    if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+                
+                Button(action: {
+                    isShowingAboutSheet = true
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 12, weight: .medium))
+                        Text("About BatchBreak")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+                .onHover { inside in
+                    if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
             }
             
             Spacer()
@@ -892,91 +919,93 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Card Stack Visual Component for Empty State
-struct HeaderCardStack: View {
+// MARK: - Minimal Hero Component for Empty State
+struct MinimalHeroVisual: View {
     var isTargeted: Bool
-    @Environment(\.colorScheme) private var colorScheme
+    var onAddFilesTap: () -> Void
     
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered: Bool = false
+    @State private var isAnimating: Bool = false
+
     var body: some View {
         ZStack {
-            // Card 1 (Back left - Mint / Teal gradient)
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            // Soft Ambient Glow
+            Circle()
                 .fill(
-                    LinearGradient(
+                    RadialGradient(
                         colors: [
-                            Color(red: 0.68, green: 0.88, blue: 0.84),
-                            Color(red: 0.82, green: 0.94, blue: 0.88)
+                            Color.blue.opacity(colorScheme == .dark ? (isTargeted ? 0.35 : 0.18) : (isTargeted ? 0.25 : 0.10)),
+                            Color.indigo.opacity(colorScheme == .dark ? (isTargeted ? 0.20 : 0.10) : (isTargeted ? 0.15 : 0.05)),
+                            Color.clear
                         ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                        center: .center,
+                        startRadius: 10,
+                        endRadius: 110
                     )
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(Color.white.opacity(0.4), lineWidth: 1)
-                )
-                .frame(width: 120, height: 152)
-                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.08), radius: 12, x: -4, y: 8)
-                .rotationEffect(.degrees(isTargeted ? -22 : -15))
-                .offset(x: isTargeted ? -42 : -30, y: isTargeted ? -14 : -8)
-            
-            // Card 2 (Middle - Lavender / Purple gradient)
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.80, green: 0.78, blue: 0.98),
-                            Color(red: 0.90, green: 0.86, blue: 1.0)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(Color.white.opacity(0.4), lineWidth: 1)
-                )
-                .frame(width: 120, height: 152)
-                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.10), radius: 14, x: -1, y: 9)
-                .rotationEffect(.degrees(isTargeted ? -9 : -5))
-                .offset(x: isTargeted ? -16 : -10, y: isTargeted ? -7 : -3)
-            
-            // Card 3 (Front right - Warm Peach / Amber gradient)
+                .frame(width: 220, height: 220)
+                .scaleEffect(isTargeted ? 1.3 : (isAnimating ? 1.05 : 0.95))
+                .blur(radius: 18)
+
+            // Minimal Glass Drop Zone Circle
             ZStack {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(
+                // Outer ring
+                Circle()
+                    .stroke(
                         LinearGradient(
                             colors: [
-                                Color(red: 1.0, green: 0.82, blue: 0.64),
-                                Color(red: 0.98, green: 0.90, blue: 0.86)
+                                (isTargeted ? Color.blue : Color.primary).opacity(isTargeted ? 0.6 : (isHovered ? 0.3 : 0.12)),
+                                (isTargeted ? Color.cyan : Color.primary).opacity(isTargeted ? 0.4 : (isHovered ? 0.2 : 0.05))
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
+                        ),
+                        lineWidth: isTargeted ? 2.5 : 1.5
+                    )
+                    .frame(width: 140, height: 140)
+                    .scaleEffect(isTargeted ? 1.1 : (isHovered ? 1.04 : 1.0))
+
+                // Inner soft filled disc
+                Circle()
+                    .fill(Color.primary.opacity(colorScheme == .dark ? (isTargeted ? 0.12 : 0.05) : (isTargeted ? 0.08 : 0.03)))
+                    .frame(width: 130, height: 130)
+
+                // Minimal Icon
+                VStack(spacing: 8) {
+                    Image(systemName: isTargeted ? "arrow.down.doc.fill" : "plus.viewfinder")
+                        .font(.system(size: 38, weight: .light))
+                        .foregroundStyle(
+                            isTargeted
+                                ? AnyShapeStyle(Color.blue)
+                                : AnyShapeStyle(
+                                    LinearGradient(
+                                        colors: [Color.primary.opacity(0.85), Color.primary.opacity(0.55)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
                         )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .stroke(Color.white.opacity(0.65), lineWidth: 1.2)
-                    )
-                
-                // Icon specified by user in the middle of the app
-                Image(systemName: "rectangle.stack.badge.plus")
-                    .font(.system(size: 36, weight: .medium))
-                    .foregroundStyle(.linearGradient(
-                        colors: [Color.primary.opacity(0.75), Color.primary.opacity(0.5)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
-                    .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 2)
+                        .scaleEffect(isTargeted ? 1.15 : (isHovered ? 1.08 : 1.0))
+                }
             }
-            .frame(width: 124, height: 156)
-            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.16), radius: 18, x: 5, y: 12)
-            .rotationEffect(.degrees(isTargeted ? 14 : 7))
-            .offset(x: isTargeted ? 20 : 12, y: isTargeted ? -4 : 2)
+            .contentShape(Circle())
+            .onTapGesture {
+                onAddFilesTap()
+            }
+            .onHover { inside in
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isHovered = inside
+                }
+                if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
         }
-        .scaleEffect(isTargeted ? 1.06 : 1.0)
-        .animation(.spring(response: 0.4, dampingFraction: 0.72), value: isTargeted)
-        .frame(height: 210)
+        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: isTargeted)
+        .animation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true), value: isAnimating)
+        .frame(height: 180)
+        .onAppear {
+            isAnimating = true
+        }
     }
 }
 
