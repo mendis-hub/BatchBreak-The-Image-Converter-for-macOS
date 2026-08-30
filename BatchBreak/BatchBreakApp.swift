@@ -13,5 +13,7 @@ struct BatchBreakApp: App {
         WindowGroup {
             ContentView()
         }
+        .windowStyle(.hiddenTitleBar)
+        .windowBackgroundDragBehavior(.enabled)
     }
 }
