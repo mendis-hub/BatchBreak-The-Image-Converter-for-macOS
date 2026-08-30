@@ -116,12 +116,11 @@ Pull requests are welcome! Please open an issue first if you'd like to discuss a
 
 ---
 
-## License
+## License & Usage
 
-Distributed under the **MIT License**. See [LICENSE](LICENSE) for details.
+The App: You are completely free to download and use this macOS app for any personal or commercial purpose.
 
----
+The Code: This is a source-available project, not open-source. The source code is provided for portfolio viewing only. You may not modify, distribute, or use this code in your own projects without my explicit permission. You also may not re-upload or distribute the app under your own name.
 
-<div align="center">
-Made with ❤️ for macOS · Built with SwiftUI
-</div>
+If you would like to use snippets of this code or contribute, please contact me at k.madusanka1@gmail.com.
+See [LICENSE](LICENSE) for details.
