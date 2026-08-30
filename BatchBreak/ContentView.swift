@@ -150,7 +150,7 @@ struct ContentView: View {
                     Button(action: {
                         isShowingFileImporter = true
                     }) {
-                        Text("Add Files...")
+                        Text("Add More Files...")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .padding(.horizontal, 14)
                             .padding(.vertical, 6)
