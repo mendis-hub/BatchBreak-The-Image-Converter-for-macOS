@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 import AppKit
 import PDFKit
 import QuickLook
+import CoreImage
 
 enum ViewMode {
     case grid
@@ -51,7 +52,73 @@ struct ContentView: View {
     ]
     
     private var allowedContentTypes: [UTType] {
-        var types: [UTType] = [.image, .pdf, .folder]
+        var types: [UTType] = [.image, .pdf, .folder, .dng, .rawImage]
+        if let orfType = UTType(filenameExtension: "orf") ?? UTType("com.olympus.raw-image") ?? UTType("com.olympus.orf-raw-image") {
+            types.append(orfType)
+        }
+        if let srfType = UTType(filenameExtension: "srf") ?? UTType("com.sony.raw-image") {
+            types.append(srfType)
+        }
+        if let sr2Type = UTType(filenameExtension: "sr2") {
+            types.append(sr2Type)
+        }
+        if let arwType = UTType(filenameExtension: "arw") {
+            types.append(arwType)
+        }
+        if let nefType = UTType(filenameExtension: "nef") ?? UTType("com.nikon.nef-raw-image") ?? UTType("com.nikon.raw-image") {
+            types.append(nefType)
+        }
+        if let nrwType = UTType(filenameExtension: "nrw") ?? UTType("com.nikon.nrw-raw-image") {
+            types.append(nrwType)
+        }
+        if let jpeType = UTType(filenameExtension: "jpe") {
+            types.append(jpeType)
+        }
+        if let jp2Type = UTType(filenameExtension: "jp2") ?? UTType("public.jpeg-2000") {
+            types.append(jp2Type)
+        }
+        if let j2kType = UTType(filenameExtension: "j2k") {
+            types.append(j2kType)
+        }
+        if let jpxType = UTType(filenameExtension: "jpx") {
+            types.append(jpxType)
+        }
+        if let jpfType = UTType(filenameExtension: "jpf") {
+            types.append(jpfType)
+        }
+        if let rafType = UTType(filenameExtension: "raf") ?? UTType("com.fuji.raw-image") {
+            types.append(rafType)
+        }
+        if let rasType = UTType(filenameExtension: "ras") ?? UTType("public.sun-raster") {
+            types.append(rasType)
+        }
+        if let sunType = UTType(filenameExtension: "sun") {
+            types.append(sunType)
+        }
+        if let srType = UTType(filenameExtension: "sr") {
+            types.append(srType)
+        }
+        if let pamType = UTType(filenameExtension: "pam") ?? UTType("public.pam") {
+            types.append(pamType)
+        }
+        if let mngType = UTType(filenameExtension: "mng") ?? UTType("com.libpng.mng") ?? UTType("public.mng") {
+            types.append(mngType)
+        }
+        if let cr3Type = UTType(filenameExtension: "cr3") ?? UTType("com.canon.cr3-raw-image") {
+            types.append(cr3Type)
+        }
+        if let wbmpType = UTType(filenameExtension: "wbmp") ?? UTType("com.wap.wbmp") {
+            types.append(wbmpType)
+        }
+        if let cr2Type = UTType(filenameExtension: "cr2") ?? UTType("com.canon.cr2-raw-image") {
+            types.append(cr2Type)
+        }
+        if let dngExtType = UTType(filenameExtension: "dng") {
+            types.append(dngExtType)
+        }
+        if let adobeRawType = UTType("com.adobe.raw-image") {
+            types.append(adobeRawType)
+        }
         if let psdType = UTType(filenameExtension: "psd") {
             types.append(psdType)
         }
@@ -856,14 +923,80 @@ struct ContentView: View {
     }
     
     nonisolated private static func decodeImage(from sourceURL: URL) -> CGImage? {
-        if let imageSource = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
-           let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) {
-            return cgImage
+        let ext = sourceURL.pathExtension.lowercased()
+        if ext == "wbmp",
+           let inputData = try? Data(contentsOf: sourceURL),
+           let wbmpCGImage = PhotoItem.decodeWBMP(data: inputData) {
+            return wbmpCGImage
+        }
+        if ext == "mng",
+           let inputData = try? Data(contentsOf: sourceURL),
+           let mngCGImage = PhotoItem.decodeMNG(data: inputData) {
+            return mngCGImage
+        }
+        if ext == "pam",
+           let inputData = try? Data(contentsOf: sourceURL),
+           let pamCGImage = PhotoItem.decodePAM(data: inputData) {
+            return pamCGImage
+        }
+        if (ext == "ras" || ext == "sun" || ext == "sr"),
+           let inputData = try? Data(contentsOf: sourceURL),
+           let rasCGImage = PhotoItem.decodeRAS(data: inputData) {
+            return rasCGImage
+        }
+        
+        let decodeOptions: [CFString: Any] = [
+            kCGImageSourceShouldCache: true,
+            ("kCGImageSourcePrioritizeQuality" as CFString): true
+        ]
+        if let imageSource = CGImageSourceCreateWithURL(sourceURL as CFURL, decodeOptions as CFDictionary) {
+            var orientation: Int32 = 1
+            if let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any],
+               let orientNum = properties[kCGImagePropertyOrientation] as? NSNumber {
+                orientation = orientNum.int32Value
+            }
+            
+            if let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, decodeOptions as CFDictionary) {
+                if orientation > 1 {
+                    let ciImage = CIImage(cgImage: cgImage).oriented(forExifOrientation: orientation)
+                    let ciContext = CIContext(options: nil)
+                    if let orientedCGImage = ciContext.createCGImage(ciImage, from: ciImage.extent) {
+                        return orientedCGImage
+                    }
+                }
+                return cgImage
+            }
         }
         if let inputData = try? Data(contentsOf: sourceURL) {
-            if let imageSource = CGImageSourceCreateWithData(inputData as CFData, nil),
-               let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) {
-                return cgImage
+            if let wbmpCGImage = PhotoItem.decodeWBMP(data: inputData) {
+                return wbmpCGImage
+            }
+            if let mngCGImage = PhotoItem.decodeMNG(data: inputData) {
+                return mngCGImage
+            }
+            if let pamCGImage = PhotoItem.decodePAM(data: inputData) {
+                return pamCGImage
+            }
+            if let rasCGImage = PhotoItem.decodeRAS(data: inputData) {
+                return rasCGImage
+            }
+            if let imageSource = CGImageSourceCreateWithData(inputData as CFData, decodeOptions as CFDictionary) {
+                var orientation: Int32 = 1
+                if let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any],
+                   let orientNum = properties[kCGImagePropertyOrientation] as? NSNumber {
+                    orientation = orientNum.int32Value
+                }
+                
+                if let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, decodeOptions as CFDictionary) {
+                    if orientation > 1 {
+                        let ciImage = CIImage(cgImage: cgImage).oriented(forExifOrientation: orientation)
+                        let ciContext = CIContext(options: nil)
+                        if let orientedCGImage = ciContext.createCGImage(ciImage, from: ciImage.extent) {
+                            return orientedCGImage
+                        }
+                    }
+                    return cgImage
+                }
             }
             if let nsImage = NSImage(data: inputData) {
                 var rect = CGRect(origin: .zero, size: nsImage.size)
