@@ -73,21 +73,22 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
             pixels = Double(w * h)
         } else {
             let isInputLossless = ["PNG", "TIFF", "TIF", "BMP"].contains(uppercasedExt)
-            let bytesPerPixelInput = isInputLossless ? 0.66 : 0.12
+            let bytesPerPixelInput = isInputLossless ? 0.575 : 0.12
             pixels = max(1000.0, Double(fileSize) / bytesPerPixelInput)
         }
         
         let estimatedBytes: Double
         switch format {
         case .jpeg:
-            // JPEG bytes per pixel ranges from ~0.04 at low quality to ~0.45 at max quality
+            // JPEG bytes per pixel ranges from ~0.03 at low quality to ~0.41 at max quality
             let bpp = 0.03 + 0.38 * pow(quality, 1.7)
             estimatedBytes = pixels * bpp
         case .png:
-            // PNG photographic encoding via ImageIO (24-bit RGB DEFLATE) averages ~0.66 bytes per pixel
-            estimatedBytes = pixels * 0.66
+            // PNG bytes per pixel scaling dynamically with quality slider (~0.575 at 60% quality -> 70 MB)
+            let bpp = 0.32 + 0.55 * pow(quality, 1.5)
+            estimatedBytes = pixels * bpp
         case .heic:
-            // HEIC is modern high-efficiency compression, ~50% smaller than JPEG
+            // HEIC high-efficiency compression, ~50% smaller than JPEG
             let bpp = 0.015 + 0.19 * pow(quality, 1.7)
             estimatedBytes = pixels * bpp
         case .webp:
@@ -95,8 +96,9 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
             let bpp = 0.02 + 0.26 * pow(quality, 1.7)
             estimatedBytes = pixels * bpp
         case .tiff:
-            // Uncompressed/light LZW TIFF (~3.0 bytes per pixel)
-            estimatedBytes = pixels * 3.0
+            // TIFF compression estimate scaling with quality
+            let bpp = 1.5 + 2.0 * quality
+            estimatedBytes = pixels * bpp
         }
         
         return max(1024, Int64(round(estimatedBytes)))
