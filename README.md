@@ -85,16 +85,6 @@ BatchBreak/
 
 ---
 
-## Contributing
-
-Pull requests are welcome! Please open an issue first if you'd like to discuss a significant change.
-
-1. Fork the repo and create your branch from `main`.
-2. Make your changes and verify the app builds cleanly.
-3. Open a pull request with a clear description of what changed and why.
-
----
-
 ## License & Usage
 
 The App: You are completely free to download and use this macOS app for any personal or commercial purpose.
