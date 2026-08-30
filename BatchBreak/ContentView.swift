@@ -150,7 +150,7 @@ struct ContentView: View {
                     Button(action: {
                         isShowingFileImporter = true
                     }) {
-                        Text("Add More Files...")
+                        Text("Add Files...")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .padding(.horizontal, 14)
                             .padding(.vertical, 6)
@@ -483,7 +483,7 @@ struct ContentView: View {
                 .padding(.bottom, 12)
             
             VStack(spacing: 8) {
-                Text("Drop your photos")
+                Text("Drop your files here")
                     .font(.system(size: 26, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
                 
