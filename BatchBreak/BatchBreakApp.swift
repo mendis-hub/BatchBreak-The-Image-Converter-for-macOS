@@ -6,13 +6,22 @@
 //
 
 import SwiftUI
+import AppKit
 
 extension Notification.Name {
     static let showAboutSheet = Notification.Name("showAboutSheet")
 }
 
+class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return true
+    }
+}
+
 @main
 struct BatchBreakApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    
     var body: some Scene {
         WindowGroup {
             ContentView()

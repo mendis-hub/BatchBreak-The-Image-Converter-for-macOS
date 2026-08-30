@@ -9,6 +9,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
 import PDFKit
+import QuickLook
 
 enum ViewMode {
     case grid
@@ -17,12 +18,17 @@ enum ViewMode {
 
 struct ContentView: View {
     @State private var photos: [PhotoItem] = []
+    @State private var selectedPhotoIDs: Set<UUID> = []
     @State private var isTargeted: Bool = false
     @State private var isShowingFileImporter: Bool = false
     @State private var isShowingAboutSheet: Bool = false
     @State private var viewMode: ViewMode = .grid
     @State private var quality: Double = 0.60
     @State private var selectedOutputFormat: OutputFormat = .jpeg
+    @State private var quickLookURL: URL? = nil
+    
+    // Keyboard Event Monitor State
+    @State private var keyMonitor: Any? = nil
     
     // MARK: - Conversion & Summary State
     @State private var isConverting: Bool = false
@@ -60,6 +66,9 @@ struct ContentView: View {
             // Native macOS window background extending under title bar
             Color(NSColor.windowBackgroundColor)
                 .ignoresSafeArea()
+                .onTapGesture {
+                    selectedPhotoIDs.removeAll()
+                }
             
             if photos.isEmpty {
                 // MARK: - Empty State View
@@ -76,10 +85,18 @@ struct ContentView: View {
                                         PhotoCardView(
                                             item: item,
                                             format: selectedOutputFormat,
-                                            quality: quality
-                                        ) {
-                                            removePhoto(item)
-                                        }
+                                            quality: quality,
+                                            isSelected: selectedPhotoIDs.contains(item.id),
+                                            onSelect: { isCommandPressed in
+                                                handleSelect(item: item, isCommandPressed: isCommandPressed)
+                                            },
+                                            onQuickLook: {
+                                                quickLookURL = item.url
+                                            },
+                                            onDelete: {
+                                                removePhotos([item])
+                                            }
+                                        )
                                     }
                                 }
                                 .padding(.horizontal, 24)
@@ -91,16 +108,27 @@ struct ContentView: View {
                                         PhotoListRowView(
                                             item: item,
                                             format: selectedOutputFormat,
-                                            quality: quality
-                                        ) {
-                                            removePhoto(item)
-                                        }
+                                            quality: quality,
+                                            isSelected: selectedPhotoIDs.contains(item.id),
+                                            onSelect: { isCommandPressed in
+                                                handleSelect(item: item, isCommandPressed: isCommandPressed)
+                                            },
+                                            onQuickLook: {
+                                                quickLookURL = item.url
+                                            },
+                                            onDelete: {
+                                                removePhotos([item])
+                                            }
+                                        )
                                     }
                                 }
                                 .padding(.horizontal, 24)
                                 .padding(.top, 80)
                                 .padding(.bottom, 56)
                             }
+                        }
+                        .onTapGesture {
+                            selectedPhotoIDs.removeAll()
                         }
                         
                         // Top Header Bar with Liquid Glass Background Material
@@ -129,6 +157,7 @@ struct ContentView: View {
         }
         .frame(minWidth: 720, minHeight: 520)
         .ignoresSafeArea()
+        .quickLookPreview($quickLookURL, in: photos.map { $0.url })
         .dropDestination(for: URL.self) { items, _ in
             addFiles(urls: items)
             return true
@@ -155,6 +184,12 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .showAboutSheet)) { _ in
             isShowingAboutSheet = true
         }
+        .onAppear {
+            setupKeyboardMonitor()
+        }
+        .onDisappear {
+            removeKeyboardMonitor()
+        }
     }
     
     // MARK: - Top Header Bar
@@ -164,8 +199,26 @@ struct ContentView: View {
             HStack(alignment: .center) {
                 Spacer()
                 
-                // Add Files & Clear Buttons
+                // Trash (Delete Selected), Add Files & Clear Buttons
                 HStack(spacing: 10) {
+                    // Circle-Shaped Delete Selected Trash Button (Left of Add Files)
+                    Button(action: deleteSelectedPhotos) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(selectedPhotoIDs.isEmpty || isConverting ? Color.secondary.opacity(0.4) : Color.red)
+                            .padding(6)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .disabled(selectedPhotoIDs.isEmpty || isConverting)
+                    .onHover { inside in
+                        if inside && !selectedPhotoIDs.isEmpty && !isConverting {
+                            NSCursor.pointingHand.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
+                    
                     Button(action: {
                         isShowingFileImporter = true
                     }) {
@@ -184,6 +237,7 @@ struct ContentView: View {
                     Button(action: {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             photos.removeAll()
+                            selectedPhotoIDs.removeAll()
                             showSummaryToast = false
                             isConversionCompleted = false
                         }
@@ -271,7 +325,7 @@ struct ContentView: View {
             
             // Text Summary Stack
             VStack(alignment: .leading, spacing: 1) {
-                Text("\(lastConvertedCount) photos converted")
+                Text(lastConvertedCount == 1 ? "1 file converted" : "\(lastConvertedCount) files converted")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(.primary)
                 
@@ -363,7 +417,7 @@ struct ContentView: View {
     
     // MARK: - Floating Photo Count Badge
     private var floatingPhotoCountBadge: some View {
-        Text("\(photos.count) photos")
+        Text(photos.count == 1 ? "1 file" : "\(photos.count) files")
             .font(.system(size: 12, weight: .semibold, design: .rounded))
             .foregroundStyle(.primary)
             .padding(.horizontal, 14)
@@ -552,6 +606,74 @@ struct ContentView: View {
         .padding(36)
     }
     
+    // MARK: - Keyboard Monitor
+    private func setupKeyboardMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Keycode 49 = Space bar
+            if event.keyCode == 49 {
+                if !self.selectedPhotoIDs.isEmpty && self.quickLookURL == nil {
+                    if let firstID = self.selectedPhotoIDs.first,
+                       let photo = self.photos.first(where: { $0.id == firstID }) {
+                        Task { @MainActor in
+                            self.quickLookURL = photo.url
+                        }
+                        return nil // Handled, suppress system beep
+                    }
+                }
+            }
+            // Keycode 51 = Delete / Backspace, Keycode 117 = Forward Delete
+            else if (event.keyCode == 51 || event.keyCode == 117) && event.modifierFlags.contains(.command) {
+                if !self.selectedPhotoIDs.isEmpty {
+                    Task { @MainActor in
+                        self.deleteSelectedPhotos()
+                    }
+                    return nil // Handled, suppress system beep
+                }
+            }
+            return event
+        }
+    }
+    
+    private func removeKeyboardMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
+    }
+    
+    // MARK: - Selection & Removal Logic
+    private func handleSelect(item: PhotoItem, isCommandPressed: Bool) {
+        if isCommandPressed {
+            if selectedPhotoIDs.contains(item.id) {
+                selectedPhotoIDs.remove(item.id)
+            } else {
+                selectedPhotoIDs.insert(item.id)
+            }
+        } else {
+            selectedPhotoIDs = [item.id]
+        }
+    }
+    
+    private func deleteSelectedPhotos() {
+        guard !selectedPhotoIDs.isEmpty else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showSummaryToast = false
+            isConversionCompleted = false
+            photos.removeAll(where: { selectedPhotoIDs.contains($0.id) })
+            selectedPhotoIDs.removeAll()
+        }
+    }
+    
+    private func removePhotos(_ items: [PhotoItem]) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showSummaryToast = false
+            isConversionCompleted = false
+            let idsToRemove = Set(items.map { $0.id }).union(selectedPhotoIDs.contains(where: { id in items.contains(where: { $0.id == id }) }) ? selectedPhotoIDs : Set(items.map { $0.id }))
+            photos.removeAll(where: { idsToRemove.contains($0.id) })
+            selectedPhotoIDs.subtract(idsToRemove)
+        }
+    }
+    
     // MARK: - Helpers & Calculation
     private var totalOriginalBytes: Int64 {
         photos.reduce(0) { $0 + $1.fileSize }
@@ -590,14 +712,6 @@ struct ContentView: View {
         
         withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
             photos.append(contentsOf: newPhotos)
-        }
-    }
-    
-    private func removePhoto(_ item: PhotoItem) {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            showSummaryToast = false
-            isConversionCompleted = false
-            photos.removeAll(where: { $0.id == item.id })
         }
     }
     
@@ -1014,6 +1128,9 @@ struct PhotoListRowView: View {
     let item: PhotoItem
     let format: OutputFormat
     let quality: Double
+    let isSelected: Bool
+    let onSelect: (Bool) -> Void
+    let onQuickLook: () -> Void
     let onDelete: () -> Void
     
     @State private var loadedImage: NSImage? = nil
@@ -1038,6 +1155,15 @@ struct PhotoListRowView: View {
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(Color.white, Color.blue)
+                        .padding(4)
+                        .allowsHitTesting(false)
+                }
+                
                 Text(item.pageCount > 1 ? "\(item.fileExtension) · \(item.pageCount) pgs" : item.fileExtension)
                     .font(.system(size: 8, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.black.opacity(0.85))
@@ -1051,7 +1177,7 @@ struct PhotoListRowView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.name)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(isSelected ? .blue : .primary)
                 
                 HStack(spacing: 4) {
                     Text(item.formattedSize)
@@ -1080,8 +1206,31 @@ struct PhotoListRowView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.primary.opacity(0.03))
+        .background(isSelected ? Color.blue.opacity(0.12) : Color.primary.opacity(0.03))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 1.5)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            let isCommand = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
+            onSelect(isCommand)
+        }
+        .overlay(
+            PhotoContextMenuOverlay(
+                onRightClickSelect: {
+                    if !isSelected {
+                        onSelect(false)
+                    }
+                },
+                onQuickLook: onQuickLook,
+                onShowOriginal: showOriginal,
+                onCopyImage: copyImage,
+                onCopyFilePath: copyFilePath,
+                onDelete: onDelete
+            )
+        )
         .onAppear {
             if loadedImage == nil {
                 item.loadThumbnailAsync(targetSize: CGSize(width: 112, height: 112)) { img in
@@ -1089,6 +1238,34 @@ struct PhotoListRowView: View {
                         self.loadedImage = img
                     }
                 }
+            }
+        }
+    }
+    
+    // MARK: - Actions
+    
+    private func showOriginal() {
+        item.withSecurityScopedAccess {
+            NSWorkspace.shared.activateFileViewerSelecting([item.url])
+        }
+    }
+    
+    private func copyFilePath() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(item.url.path, forType: .string)
+    }
+    
+    private func copyImage() {
+        item.withSecurityScopedAccess {
+            if let image = NSImage(contentsOf: item.url) {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.writeObjects([image])
+            } else if let thumbnail = loadedImage {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.writeObjects([thumbnail])
             }
         }
     }

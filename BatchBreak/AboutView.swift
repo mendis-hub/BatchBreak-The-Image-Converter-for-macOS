@@ -12,11 +12,11 @@ struct AboutView: View {
     @Environment(\.dismiss) private var dismiss
     
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.1"
     }
     
     private var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "2"
     }
     
     private let repoURL = URL(string: "https://github.com/mendis-hub/BatchBreak-The-Image-Converter-for-macOS")!
