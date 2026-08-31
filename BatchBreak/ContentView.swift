@@ -1036,6 +1036,9 @@ struct ContentView: View {
                     showSummaryToast = true
                     isConversionCompleted = true
                 }
+                if successfulConversions > 0 {
+                    NSSound(named: "Glass")?.play()
+                }
             }
         }
     }
