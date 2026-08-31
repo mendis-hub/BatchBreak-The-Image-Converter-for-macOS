@@ -44,7 +44,7 @@ Convert hundreds of images at once to JPEG, PNG, HEIC, WEBP, TIFF, or PDF. Just 
 ## How It Works
 
 1. **Drop files** onto the window, or click **Add Files…** to open a file picker.  
-   Supported inputs: `JPG`, `PNG`, `HEIC`, `WEBP`, `TIFF`, `BMP`, `GIF`, `PDF`, `PSD`, `EPS`, `SVG`, and entire folders.
+   Supported inputs: `JPG`, `PNG`, `HEIC`, `HEIF`, `WEBP`, `TIFF`, `BMP`, `GIF`, `PDF`, `PSD`, `JP2`, `JPE`, `JPS`, `ICO`, `PICT`, `PPM`, `PNM`, `PAM`, `SGI`, `RAS`, `WBMP`, `MNG`, RAW camera files (`DNG`, `CR2`, `CR3`, `RAF`, `ARW`, `NEF`, `NRW`, `ORF`, `RW2`), and entire folders.
 
 2. **Choose a format** from the menu in the bottom bar (`JPEG`, `PNG`, `HEIC`, `WEBP`, `TIFF`, `PDF`).
 
@@ -74,16 +74,30 @@ BatchBreak/
 
 | Format | Input | Output | Notes |
 |--------|:-----:|:------:|-------|
-| JPEG   | ✅ | ✅ | Quality slider applies |
+| JPEG / JPE / JPS | ✅ | ✅ | Quality slider applies |
 | PNG    | ✅ | ✅ | Lossless |
-| HEIC   | ✅ | ✅ | Quality slider applies |
+| HEIC / HEIF | ✅ | ✅ | Quality slider applies |
 | WEBP   | ✅ | ✅ | |
 | TIFF   | ✅ | ✅ | Lossless |
 | PDF    | ✅ | ✅ | Multi-page split on export to images |
-| EPS    | ✅ | — | Vector & raster PostScript (`.eps`, `.epsf`, `.ps`); converts to any format |
-| SVG    | ✅ | — | Vector graphic; converts to any output format |
-| PSD    | ✅ | — | Read-only; converts to any output format |
-| BMP, GIF | ✅ | — | Accepted as input |
+| JPEG 2000 (JP2) | ✅ | — | |
+| ICO    | ✅ | — | Windows icon format |
+| BMP / WBMP | ✅ | — | |
+| GIF    | ✅ | — | |
+| MNG    | ✅ | — | Animated PNG predecessor |
+| PICT   | ✅ | — | Classic Mac image format |
+| PPM / PNM / PAM | ✅ | — | Portable bitmap formats |
+| SGI    | ✅ | — | Silicon Graphics image format |
+| RAS    | ✅ | — | Sun Raster format |
+| PSD    | ✅ | — | Adobe Photoshop |
+| **RAW Camera Formats** | | | |
+| DNG    | ✅ | — | Adobe Digital Negative |
+| CR2 / CR3 | ✅ | — | Canon RAW |
+| RAF    | ✅ | — | Fujifilm RAW |
+| ARW    | ✅ | — | Sony RAW |
+| NEF / NRW | ✅ | — | Nikon RAW |
+| ORF    | ✅ | — | Olympus RAW |
+| RW2    | ✅ | — | Panasonic RAW |
 
 ---
 
