@@ -9,6 +9,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import ImageIO
 import PDFKit
+import AppKit
 
 struct PhotoItem: Identifiable, Hashable, Sendable {
     let id: UUID
@@ -79,7 +80,12 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         if let w = pixelWidth, let h = pixelHeight, w > 0, h > 0 {
             pixels = Double(w * h)
         } else {
-            let isInputLossless = ["PNG", "TIFF", "TIF", "BMP", "PSD", "PDF", "DNG", "RAW", "CR2", "CR3", "RAF", "NRW", "NEF", "SRF", "SR2", "ARW", "ORF", "JP2", "J2K", "JPX", "JPF", "WBMP", "MNG", "PAM", "RAS", "SUN", "SR"].contains(uppercasedExt)
+            let isInputLossless = [
+                "PNG", "TIFF", "TIF", "BMP", "PSD", "PDF", "DNG", "RAW", "CR2", "CR3", "RAF", "NRW",
+                "NEF", "SRF", "SR2", "ARW", "ORF", "JP2", "J2K", "JPX", "JPF", "WBMP", "MNG", "PAM",
+                "RAS", "SUN", "SR", "RW4", "RW2", "RWL", "PPM", "PNM", "PGM", "PBM", "PICT", "PCT",
+                "PIC", "SGI", "RGB", "RGBA", "BW", "INT", "INTA", "ICO", "CUR"
+            ].contains(uppercasedExt)
             let bytesPerPixelInput = isInputLossless ? 0.575 : 0.12
             pixels = max(1000.0, Double(fileSize) / bytesPerPixelInput)
         }
@@ -408,6 +414,442 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         return cgImage
     }
     
+    // MARK: - Dedicated PPM / PNM Decoder (P1, P2, P3, P4, P5, P6)
+    nonisolated static func decodePPM(data: Data) -> CGImage? {
+        guard data.count >= 8 else { return nil }
+        let bytes = [UInt8](data)
+        var index = 0
+        
+        func skipWhitespaceAndComments() {
+            while index < bytes.count {
+                let b = bytes[index]
+                if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
+                    index += 1
+                } else if b == 0x23 { // '#' comment
+                    while index < bytes.count && bytes[index] != 0x0A && bytes[index] != 0x0D {
+                        index += 1
+                    }
+                } else {
+                    break
+                }
+            }
+        }
+        
+        func readToken() -> String? {
+            skipWhitespaceAndComments()
+            guard index < bytes.count else { return nil }
+            let start = index
+            while index < bytes.count {
+                let b = bytes[index]
+                if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D || b == 0x23 {
+                    break
+                }
+                index += 1
+            }
+            guard index > start else { return nil }
+            return String(bytes: bytes[start..<index], encoding: .ascii)
+        }
+        
+        guard let magic = readToken() else { return nil }
+        guard magic == "P6" || magic == "P3" || magic == "P5" || magic == "P2" || magic == "P4" || magic == "P1" else { return nil }
+        
+        guard let widthStr = readToken(), let width = Int(widthStr), width > 0 else { return nil }
+        guard let heightStr = readToken(), let height = Int(heightStr), height > 0 else { return nil }
+        
+        var maxval = 255
+        if magic != "P1" && magic != "P4" {
+            guard let maxvalStr = readToken(), let m = Int(maxvalStr), m > 0 else { return nil }
+            maxval = m
+        }
+        
+        let totalPixels = width * height
+        var rgba = [UInt8](repeating: 0, count: totalPixels * 4)
+        var outIdx = 0
+        
+        let scale: (Int) -> UInt8 = { val in
+            if maxval == 255 { return UInt8(clamping: val) }
+            let clampedVal = min(max(val, 0), maxval)
+            return UInt8(clamping: Int(round((Double(clampedVal) / Double(maxval)) * 255.0)))
+        }
+        
+        if magic == "P6" { // PPM binary RGB
+            if index < bytes.count {
+                let b = bytes[index]
+                if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
+                    index += 1
+                    if b == 0x0D && index < bytes.count && bytes[index] == 0x0A {
+                        index += 1
+                    }
+                }
+            }
+            
+            let bytesPerSample = maxval > 255 ? 2 : 1
+            let bytesPerPixel = 3 * bytesPerSample
+            guard data.count - index >= totalPixels * bytesPerPixel else { return nil }
+            
+            var inIdx = index
+            for _ in 0..<totalPixels {
+                let r: UInt8
+                let g: UInt8
+                let b: UInt8
+                if bytesPerSample == 1 {
+                    r = scale(Int(bytes[inIdx]))
+                    g = scale(Int(bytes[inIdx + 1]))
+                    b = scale(Int(bytes[inIdx + 2]))
+                    inIdx += 3
+                } else {
+                    let rVal = (Int(bytes[inIdx]) << 8) | Int(bytes[inIdx + 1])
+                    let gVal = (Int(bytes[inIdx + 2]) << 8) | Int(bytes[inIdx + 3])
+                    let bVal = (Int(bytes[inIdx + 4]) << 8) | Int(bytes[inIdx + 5])
+                    r = scale(rVal)
+                    g = scale(gVal)
+                    b = scale(bVal)
+                    inIdx += 6
+                }
+                rgba[outIdx] = r
+                rgba[outIdx + 1] = g
+                rgba[outIdx + 2] = b
+                rgba[outIdx + 3] = 255
+                outIdx += 4
+            }
+        } else if magic == "P3" { // PPM ASCII RGB
+            for _ in 0..<totalPixels {
+                guard let rStr = readToken(), let rVal = Int(rStr),
+                      let gStr = readToken(), let gVal = Int(gStr),
+                      let bStr = readToken(), let bVal = Int(bStr) else {
+                    return nil
+                }
+                rgba[outIdx] = scale(rVal)
+                rgba[outIdx + 1] = scale(gVal)
+                rgba[outIdx + 2] = scale(bVal)
+                rgba[outIdx + 3] = 255
+                outIdx += 4
+            }
+        } else if magic == "P5" { // PGM binary Grayscale
+            if index < bytes.count {
+                let b = bytes[index]
+                if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
+                    index += 1
+                    if b == 0x0D && index < bytes.count && bytes[index] == 0x0A {
+                        index += 1
+                    }
+                }
+            }
+            let bytesPerSample = maxval > 255 ? 2 : 1
+            guard data.count - index >= totalPixels * bytesPerSample else { return nil }
+            var inIdx = index
+            for _ in 0..<totalPixels {
+                let gray: UInt8
+                if bytesPerSample == 1 {
+                    gray = scale(Int(bytes[inIdx]))
+                    inIdx += 1
+                } else {
+                    let gVal = (Int(bytes[inIdx]) << 8) | Int(bytes[inIdx + 1])
+                    gray = scale(gVal)
+                    inIdx += 2
+                }
+                rgba[outIdx] = gray
+                rgba[outIdx + 1] = gray
+                rgba[outIdx + 2] = gray
+                rgba[outIdx + 3] = 255
+                outIdx += 4
+            }
+        } else if magic == "P2" { // PGM ASCII Grayscale
+            for _ in 0..<totalPixels {
+                guard let valStr = readToken(), let val = Int(valStr) else { return nil }
+                let gray = scale(val)
+                rgba[outIdx] = gray
+                rgba[outIdx + 1] = gray
+                rgba[outIdx + 2] = gray
+                rgba[outIdx + 3] = 255
+                outIdx += 4
+            }
+        } else if magic == "P4" { // PBM binary Bitmap
+            if index < bytes.count {
+                let b = bytes[index]
+                if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
+                    index += 1
+                    if b == 0x0D && index < bytes.count && bytes[index] == 0x0A {
+                        index += 1
+                    }
+                }
+            }
+            let bytesPerRow = (width + 7) / 8
+            guard data.count - index >= bytesPerRow * height else { return nil }
+            for y in 0..<height {
+                let rowStart = index + y * bytesPerRow
+                for x in 0..<width {
+                    let byteIndex = rowStart + (x / 8)
+                    let bitIndex = 7 - (x % 8)
+                    let bit = (bytes[byteIndex] >> bitIndex) & 1
+                    let c: UInt8 = (bit == 1) ? 0 : 255
+                    rgba[outIdx] = c
+                    rgba[outIdx + 1] = c
+                    rgba[outIdx + 2] = c
+                    rgba[outIdx + 3] = 255
+                    outIdx += 4
+                }
+            }
+        } else if magic == "P1" { // PBM ASCII Bitmap
+            for _ in 0..<totalPixels {
+                guard let valStr = readToken(), let val = Int(valStr) else { return nil }
+                let c: UInt8 = (val == 1) ? 0 : 255
+                rgba[outIdx] = c
+                rgba[outIdx + 1] = c
+                rgba[outIdx + 2] = c
+                rgba[outIdx + 3] = 255
+                outIdx += 4
+            }
+        }
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let provider = CGDataProvider(data: Data(rgba) as CFData),
+              let cgImage = CGImage(
+                  width: width,
+                  height: height,
+                  bitsPerComponent: 8,
+                  bitsPerPixel: 32,
+                  bytesPerRow: width * 4,
+                  space: colorSpace,
+                  bitmapInfo: bitmapInfo,
+                  provider: provider,
+                  decode: nil,
+                  shouldInterpolate: true,
+                  intent: .defaultIntent
+              ) else {
+            return nil
+        }
+        
+        return cgImage
+    }
+    
+    // MARK: - Dedicated SGI (.sgi, .rgb, .rgba, .bw, .int, .inta) Decoder
+    nonisolated static func decodeSGI(data: Data) -> CGImage? {
+        guard data.count >= 512 else { return nil }
+        let bytes = [UInt8](data)
+        
+        let readUInt16: (Int) -> UInt16 = { off in
+            (UInt16(bytes[off]) << 8) | UInt16(bytes[off + 1])
+        }
+        let readUInt32: (Int) -> UInt32 = { off in
+            (UInt32(bytes[off]) << 24) | (UInt32(bytes[off + 1]) << 16) | (UInt32(bytes[off + 2]) << 8) | UInt32(bytes[off + 3])
+        }
+        
+        let magic = readUInt16(0)
+        guard magic == 0x01DA else { return nil }
+        
+        let storage = bytes[2] // 0: uncompressed, 1: RLE
+        let bpc = Int(bytes[3]) // 1 or 2 bytes per channel
+        guard bpc == 1 || bpc == 2 else { return nil }
+        
+        let width = Int(readUInt16(6))
+        let height = Int(readUInt16(8))
+        let channels = Int(readUInt16(10))
+        
+        guard width > 0, height > 0, channels > 0 else { return nil }
+        let totalPixels = width * height
+        
+        var channelPlanes = [[UInt8]](repeating: [UInt8](repeating: 0, count: totalPixels), count: min(channels, 4))
+        
+        if storage == 0 { // Uncompressed
+            let bytesPerSample = bpc
+            var offset = 512
+            for c in 0..<min(channels, 4) {
+                // SGI rows are stored bottom to top: row 0 is bottom row (y = height - 1)
+                for y in (0..<height).reversed() {
+                    let rowStart = y * width
+                    for x in 0..<width {
+                        if offset + bytesPerSample <= bytes.count {
+                            channelPlanes[c][rowStart + x] = bytes[offset]
+                            offset += bytesPerSample
+                        }
+                    }
+                }
+                if c == 3 && channels > 4 {
+                    offset += (channels - 4) * totalPixels * bytesPerSample
+                }
+            }
+        } else if storage == 1 { // RLE
+            let numRows = height * channels
+            let tableOffset = 512
+            guard data.count >= tableOffset + numRows * 4 * 2 else { return nil }
+            
+            var rowOffsets = [Int](repeating: 0, count: numRows)
+            for i in 0..<numRows {
+                rowOffsets[i] = Int(readUInt32(tableOffset + i * 4))
+            }
+            
+            for c in 0..<min(channels, 4) {
+                for y in 0..<height {
+                    let destY = height - 1 - y
+                    let destRowStart = destY * width
+                    let rowIndex = y + c * height
+                    let rleOffset = rowOffsets[rowIndex]
+                    guard rleOffset < bytes.count else { continue }
+                    
+                    var inIdx = rleOffset
+                    var x = 0
+                    if bpc == 1 {
+                        while inIdx < bytes.count && x < width {
+                            let pixel = bytes[inIdx]; inIdx += 1
+                            let count = Int(pixel & 0x7F)
+                            if count == 0 { break }
+                            if (pixel & 0x80) != 0 {
+                                for _ in 0..<count {
+                                    if inIdx < bytes.count && x < width {
+                                        channelPlanes[c][destRowStart + x] = bytes[inIdx]
+                                        inIdx += 1
+                                        x += 1
+                                    }
+                                }
+                            } else {
+                                if inIdx < bytes.count {
+                                    let val = bytes[inIdx]; inIdx += 1
+                                    for _ in 0..<count {
+                                        if x < width {
+                                            channelPlanes[c][destRowStart + x] = val
+                                            x += 1
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else { // 16-bit
+                        while inIdx + 1 < bytes.count && x < width {
+                            let pixelHigh = bytes[inIdx]
+                            let pixelLow = bytes[inIdx + 1]
+                            inIdx += 2
+                            let pixel16 = (UInt16(pixelHigh) << 8) | UInt16(pixelLow)
+                            let count = Int(pixel16 & 0x7F)
+                            if count == 0 { break }
+                            if (pixel16 & 0x80) != 0 {
+                                for _ in 0..<count {
+                                    if inIdx + 1 < bytes.count && x < width {
+                                        channelPlanes[c][destRowStart + x] = bytes[inIdx]
+                                        inIdx += 2
+                                        x += 1
+                                    }
+                                }
+                            } else {
+                                if inIdx + 1 < bytes.count {
+                                    let val = bytes[inIdx]
+                                    inIdx += 2
+                                    for _ in 0..<count {
+                                        if x < width {
+                                            channelPlanes[c][destRowStart + x] = val
+                                            x += 1
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            return nil
+        }
+        
+        var rgba = [UInt8](repeating: 0, count: totalPixels * 4)
+        var outIdx = 0
+        for i in 0..<totalPixels {
+            if channels == 1 {
+                let g = channelPlanes[0][i]
+                rgba[outIdx] = g
+                rgba[outIdx + 1] = g
+                rgba[outIdx + 2] = g
+                rgba[outIdx + 3] = 255
+            } else if channels == 2 {
+                let g = channelPlanes[0][i]
+                let a = channelPlanes[1][i]
+                rgba[outIdx] = g
+                rgba[outIdx + 1] = g
+                rgba[outIdx + 2] = g
+                rgba[outIdx + 3] = a
+            } else if channels == 3 {
+                rgba[outIdx] = channelPlanes[0][i]     // R
+                rgba[outIdx + 1] = channelPlanes[1][i] // G
+                rgba[outIdx + 2] = channelPlanes[2][i] // B
+                rgba[outIdx + 3] = 255
+            } else {
+                rgba[outIdx] = channelPlanes[0][i]     // R
+                rgba[outIdx + 1] = channelPlanes[1][i] // G
+                rgba[outIdx + 2] = channelPlanes[2][i] // B
+                rgba[outIdx + 3] = channelPlanes[3][i] // A
+            }
+            outIdx += 4
+        }
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let provider = CGDataProvider(data: Data(rgba) as CFData),
+              let cgImage = CGImage(
+                  width: width,
+                  height: height,
+                  bitsPerComponent: 8,
+                  bitsPerPixel: 32,
+                  bytesPerRow: width * 4,
+                  space: colorSpace,
+                  bitmapInfo: bitmapInfo,
+                  provider: provider,
+                  decode: nil,
+                  shouldInterpolate: true,
+                  intent: .defaultIntent
+              ) else {
+            return nil
+        }
+        
+        return cgImage
+    }
+    
+    // MARK: - Dedicated PICT (.pict, .pct, .pic) Decoder
+    nonisolated static func decodePICT(data: Data) -> CGImage? {
+        if let imageSource = CGImageSourceCreateWithData(data as CFData, nil),
+           let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) {
+            return cgImage
+        }
+        if let imageRep = NSPICTImageRep(data: data) {
+            let nsImage = NSImage(size: imageRep.size)
+            nsImage.addRepresentation(imageRep)
+            var rect = CGRect(origin: .zero, size: imageRep.size)
+            if let cgImage = nsImage.cgImage(forProposedRect: &rect, context: nil, hints: nil) {
+                return cgImage
+            }
+        }
+        if let nsImage = NSImage(data: data) {
+            var rect = CGRect(origin: .zero, size: nsImage.size)
+            if let cgImage = nsImage.cgImage(forProposedRect: &rect, context: nil, hints: nil) {
+                return cgImage
+            }
+        }
+        return nil
+    }
+    
+    // MARK: - Dedicated ICO / Multi-Frame Icon Decoder
+    nonisolated static func decodeICO(data: Data) -> CGImage? {
+        guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let count = CGImageSourceGetCount(imageSource)
+        guard count > 0 else { return nil }
+        
+        var bestIndex = 0
+        var maxArea = 0
+        
+        for i in 0..<count {
+            if let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, i, nil) as? [CFString: Any] {
+                let w = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue ?? 0
+                let h = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue ?? 0
+                let area = w * h
+                if area > maxArea {
+                    maxArea = area
+                    bestIndex = i
+                }
+            }
+        }
+        
+        return CGImageSourceCreateImageAtIndex(imageSource, bestIndex, nil)
+    }
+    
     // MARK: - Dedicated Sun Raster (.ras) Decoder
     nonisolated static func decodeRAS(data: Data) -> CGImage? {
         guard data.count >= 32 else { return nil }
@@ -605,27 +1047,43 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         var height: Int? = nil
         var pageCount = 1
         
-        if let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
-           let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any] {
-            var rawW: Int? = nil
-            var rawH: Int? = nil
-            if let w = properties[kCGImagePropertyPixelWidth] {
-                rawW = (w as? NSNumber)?.intValue ?? (w as? Int)
+        if let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) {
+            let count = CGImageSourceGetCount(imageSource)
+            var bestW = 0
+            var bestH = 0
+            
+            for i in 0..<count {
+                if let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, i, nil) as? [CFString: Any] {
+                    var curW = 0
+                    var curH = 0
+                    if let w = properties[kCGImagePropertyPixelWidth] {
+                        curW = (w as? NSNumber)?.intValue ?? ((w as? Int) ?? 0)
+                    }
+                    if let h = properties[kCGImagePropertyPixelHeight] {
+                        curH = (h as? NSNumber)?.intValue ?? ((h as? Int) ?? 0)
+                    }
+                    let orient = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+                    if orient >= 5 && orient <= 8 {
+                        swap(&curW, &curH)
+                    }
+                    if curW * curH > bestW * bestH {
+                        bestW = curW
+                        bestH = curH
+                    }
+                }
             }
-            if let h = properties[kCGImagePropertyPixelHeight] {
-                rawH = (h as? NSNumber)?.intValue ?? (h as? Int)
-            }
-            let orient = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
-            if orient >= 5 && orient <= 8 {
-                width = rawH
-                height = rawW
-            } else {
-                width = rawW
-                height = rawH
+            if bestW > 0, bestH > 0 {
+                width = bestW
+                height = bestH
             }
         }
         
-        if ext == "WBMP" || ext == "MNG" || ext == "PAM" || ext == "RAS" || ext == "SUN" || ext == "SR" || (width == nil || height == nil) {
+        let customFormatExtensions: Set<String> = [
+            "WBMP", "MNG", "PAM", "RAS", "SUN", "SR", "PPM", "PNM", "PGM", "PBM",
+            "PICT", "PCT", "PIC", "SGI", "RGB", "RGBA", "BW", "INT", "INTA", "ICO", "CUR"
+        ]
+        
+        if customFormatExtensions.contains(ext) || (width == nil || height == nil) {
             if let data = try? Data(contentsOf: url) {
                 if let wbmpCGImage = decodeWBMP(data: data) {
                     width = wbmpCGImage.width
@@ -639,6 +1097,18 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                 } else if let rasCGImage = decodeRAS(data: data) {
                     width = rasCGImage.width
                     height = rasCGImage.height
+                } else if let ppmCGImage = decodePPM(data: data) {
+                    width = ppmCGImage.width
+                    height = ppmCGImage.height
+                } else if let sgiCGImage = decodeSGI(data: data) {
+                    width = sgiCGImage.width
+                    height = sgiCGImage.height
+                } else if let pictCGImage = decodePICT(data: data) {
+                    width = pictCGImage.width
+                    height = pictCGImage.height
+                } else if let icoCGImage = decodeICO(data: data) {
+                    width = icoCGImage.width
+                    height = icoCGImage.height
                 }
             }
         }
@@ -686,7 +1156,13 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                     return []
                 }
                 var imageURLs: [URL] = []
-                let validExtensions = ["jpg", "jpeg", "jpe", "png", "heic", "heif", "webp", "tiff", "tif", "bmp", "gif", "pdf", "psd", "dng", "raw", "cr2", "cr3", "raf", "nrw", "nef", "srf", "sr2", "arw", "orf", "jp2", "j2k", "jpx", "jpf", "wbmp", "mng", "pam", "ras", "sun", "sr"]
+                let validExtensions = [
+                    "jpg", "jpeg", "jpe", "png", "heic", "heif", "webp", "tiff", "tif", "bmp", "gif",
+                    "pdf", "psd", "dng", "raw", "cr2", "cr3", "raf", "nrw", "nef", "srf", "sr2", "arw", "orf",
+                    "jp2", "j2k", "jpx", "jpf", "wbmp", "mng", "pam", "ras", "sun", "sr", "rw4", "rw2", "rwl",
+                    "ppm", "pnm", "pgm", "pbm", "pict", "pct", "pic", "sgi", "rgb", "rgba", "bw", "int", "inta",
+                    "jps", "ico", "cur"
+                ]
                 for case let fileURL as URL in enumerator {
                     if validExtensions.contains(fileURL.pathExtension.lowercased()) {
                         imageURLs.append(fileURL)
@@ -694,7 +1170,13 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                 }
                 return imageURLs
             } else {
-                let validExtensions = ["jpg", "jpeg", "jpe", "png", "heic", "heif", "webp", "tiff", "tif", "bmp", "gif", "pdf", "psd", "dng", "raw", "cr2", "cr3", "raf", "nrw", "nef", "srf", "sr2", "arw", "orf", "jp2", "j2k", "jpx", "jpf", "wbmp", "mng", "pam", "ras", "sun", "sr"]
+                let validExtensions = [
+                    "jpg", "jpeg", "jpe", "png", "heic", "heif", "webp", "tiff", "tif", "bmp", "gif",
+                    "pdf", "psd", "dng", "raw", "cr2", "cr3", "raf", "nrw", "nef", "srf", "sr2", "arw", "orf",
+                    "jp2", "j2k", "jpx", "jpf", "wbmp", "mng", "pam", "ras", "sun", "sr", "rw4", "rw2", "rwl",
+                    "ppm", "pnm", "pgm", "pbm", "pict", "pct", "pic", "sgi", "rgb", "rgba", "bw", "int", "inta",
+                    "jps", "ico", "cur"
+                ]
                 if validExtensions.contains(url.pathExtension.lowercased()) {
                     return [url]
                 }
@@ -736,6 +1218,30 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                         return NSImage(cgImage: cgImage, size: targetSize)
                     }
                 }
+                if extLower == "ppm" || extLower == "pnm" || extLower == "pgm" || extLower == "pbm" {
+                    if let data = try? Data(contentsOf: self.url),
+                       let cgImage = PhotoItem.decodePPM(data: data) {
+                        return NSImage(cgImage: cgImage, size: targetSize)
+                    }
+                }
+                if extLower == "sgi" || extLower == "rgb" || extLower == "rgba" || extLower == "bw" || extLower == "int" || extLower == "inta" {
+                    if let data = try? Data(contentsOf: self.url),
+                       let cgImage = PhotoItem.decodeSGI(data: data) {
+                        return NSImage(cgImage: cgImage, size: targetSize)
+                    }
+                }
+                if extLower == "pict" || extLower == "pct" || extLower == "pic" {
+                    if let data = try? Data(contentsOf: self.url),
+                       let cgImage = PhotoItem.decodePICT(data: data) {
+                        return NSImage(cgImage: cgImage, size: targetSize)
+                    }
+                }
+                if extLower == "ico" || extLower == "cur" {
+                    if let data = try? Data(contentsOf: self.url),
+                       let cgImage = PhotoItem.decodeICO(data: data) {
+                        return NSImage(cgImage: cgImage, size: targetSize)
+                    }
+                }
                 if let imageSource = CGImageSourceCreateWithURL(self.url as CFURL, nil) {
                     let maxPixelSize = max(targetSize.width, targetSize.height) * 2
                     let options: [CFString: Any] = [
@@ -758,6 +1264,18 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                         return NSImage(cgImage: cgImage, size: targetSize)
                     }
                     if let cgImage = PhotoItem.decodeRAS(data: data) {
+                        return NSImage(cgImage: cgImage, size: targetSize)
+                    }
+                    if let cgImage = PhotoItem.decodePPM(data: data) {
+                        return NSImage(cgImage: cgImage, size: targetSize)
+                    }
+                    if let cgImage = PhotoItem.decodeSGI(data: data) {
+                        return NSImage(cgImage: cgImage, size: targetSize)
+                    }
+                    if let cgImage = PhotoItem.decodePICT(data: data) {
+                        return NSImage(cgImage: cgImage, size: targetSize)
+                    }
+                    if let cgImage = PhotoItem.decodeICO(data: data) {
                         return NSImage(cgImage: cgImage, size: targetSize)
                     }
                 }

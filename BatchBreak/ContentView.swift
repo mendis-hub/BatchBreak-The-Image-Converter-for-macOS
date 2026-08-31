@@ -52,7 +52,64 @@ struct ContentView: View {
     ]
     
     private var allowedContentTypes: [UTType] {
-        var types: [UTType] = [.image, .pdf, .folder, .dng, .rawImage]
+        var types: [UTType] = [.image, .pdf, .folder, .dng, .rawImage, .ico]
+        if let icoType = UTType(filenameExtension: "ico") ?? UTType("com.microsoft.ico") ?? UTType("public.ico") {
+            types.append(icoType)
+        }
+        if let curType = UTType(filenameExtension: "cur") ?? UTType("com.microsoft.cur") {
+            types.append(curType)
+        }
+        if let jpsType = UTType(filenameExtension: "jps") ?? UTType("public.jps") {
+            types.append(jpsType)
+        }
+        if let pictType = UTType(filenameExtension: "pict") ?? UTType("com.apple.pict") {
+            types.append(pictType)
+        }
+        if let pctType = UTType(filenameExtension: "pct") {
+            types.append(pctType)
+        }
+        if let picType = UTType(filenameExtension: "pic") {
+            types.append(picType)
+        }
+        if let sgiType = UTType(filenameExtension: "sgi") ?? UTType("com.sgi.sgi-image") {
+            types.append(sgiType)
+        }
+        if let rgbType = UTType(filenameExtension: "rgb") ?? UTType("com.sgi.rgb-image") {
+            types.append(rgbType)
+        }
+        if let rgbaType = UTType(filenameExtension: "rgba") {
+            types.append(rgbaType)
+        }
+        if let bwType = UTType(filenameExtension: "bw") {
+            types.append(bwType)
+        }
+        if let intType = UTType(filenameExtension: "int") {
+            types.append(intType)
+        }
+        if let intaType = UTType(filenameExtension: "inta") {
+            types.append(intaType)
+        }
+        if let ppmType = UTType(filenameExtension: "ppm") ?? UTType("public.ppm") ?? UTType("public.pnm") {
+            types.append(ppmType)
+        }
+        if let pnmType = UTType(filenameExtension: "pnm") {
+            types.append(pnmType)
+        }
+        if let pgmType = UTType(filenameExtension: "pgm") {
+            types.append(pgmType)
+        }
+        if let pbmType = UTType(filenameExtension: "pbm") {
+            types.append(pbmType)
+        }
+        if let rw4Type = UTType(filenameExtension: "rw4") {
+            types.append(rw4Type)
+        }
+        if let rw2Type = UTType(filenameExtension: "rw2") ?? UTType("com.panasonic.raw-image") {
+            types.append(rw2Type)
+        }
+        if let rwlType = UTType(filenameExtension: "rwl") ?? UTType("com.leica.raw-image") {
+            types.append(rwlType)
+        }
         if let orfType = UTType(filenameExtension: "orf") ?? UTType("com.olympus.raw-image") ?? UTType("com.olympus.orf-raw-image") {
             types.append(orfType)
         }
@@ -802,7 +859,7 @@ struct ContentView: View {
         let response = openPanel.runModal()
         guard response == .OK, let destinationFolder = openPanel.url else { return }
         
-        // Immediately capture security-scoped bookmark on main thread right after NSOpenPanel returns
+        // Capture security-scoped bookmark
         let destinationBookmark = (try? destinationFolder.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil))
             ?? (try? destinationFolder.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil))
         
@@ -924,6 +981,11 @@ struct ContentView: View {
     
     nonisolated private static func decodeImage(from sourceURL: URL) -> CGImage? {
         let ext = sourceURL.pathExtension.lowercased()
+        if (ext == "ico" || ext == "cur"),
+           let inputData = try? Data(contentsOf: sourceURL),
+           let icoCGImage = PhotoItem.decodeICO(data: inputData) {
+            return icoCGImage
+        }
         if ext == "wbmp",
            let inputData = try? Data(contentsOf: sourceURL),
            let wbmpCGImage = PhotoItem.decodeWBMP(data: inputData) {
@@ -938,6 +1000,21 @@ struct ContentView: View {
            let inputData = try? Data(contentsOf: sourceURL),
            let pamCGImage = PhotoItem.decodePAM(data: inputData) {
             return pamCGImage
+        }
+        if (ext == "ppm" || ext == "pnm" || ext == "pgm" || ext == "pbm"),
+           let inputData = try? Data(contentsOf: sourceURL),
+           let ppmCGImage = PhotoItem.decodePPM(data: inputData) {
+            return ppmCGImage
+        }
+        if (ext == "sgi" || ext == "rgb" || ext == "rgba" || ext == "bw" || ext == "int" || ext == "inta"),
+           let inputData = try? Data(contentsOf: sourceURL),
+           let sgiCGImage = PhotoItem.decodeSGI(data: inputData) {
+            return sgiCGImage
+        }
+        if (ext == "pict" || ext == "pct" || ext == "pic"),
+           let inputData = try? Data(contentsOf: sourceURL),
+           let pictCGImage = PhotoItem.decodePICT(data: inputData) {
+            return pictCGImage
         }
         if (ext == "ras" || ext == "sun" || ext == "sr"),
            let inputData = try? Data(contentsOf: sourceURL),
@@ -968,6 +1045,9 @@ struct ContentView: View {
             }
         }
         if let inputData = try? Data(contentsOf: sourceURL) {
+            if let icoCGImage = PhotoItem.decodeICO(data: inputData) {
+                return icoCGImage
+            }
             if let wbmpCGImage = PhotoItem.decodeWBMP(data: inputData) {
                 return wbmpCGImage
             }
@@ -976,6 +1056,15 @@ struct ContentView: View {
             }
             if let pamCGImage = PhotoItem.decodePAM(data: inputData) {
                 return pamCGImage
+            }
+            if let ppmCGImage = PhotoItem.decodePPM(data: inputData) {
+                return ppmCGImage
+            }
+            if let sgiCGImage = PhotoItem.decodeSGI(data: inputData) {
+                return sgiCGImage
+            }
+            if let pictCGImage = PhotoItem.decodePICT(data: inputData) {
+                return pictCGImage
             }
             if let rasCGImage = PhotoItem.decodeRAS(data: inputData) {
                 return rasCGImage
@@ -1311,16 +1400,6 @@ struct PhotoListRowView: View {
                 Text(item.name)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(isSelected ? .blue : .primary)
-                
-                HStack(spacing: 4) {
-                    Text(item.formattedSize)
-                        .foregroundStyle(.secondary)
-                    Text("→")
-                        .foregroundStyle(.tertiary)
-                    Text(item.formattedEstimatedSize(format: format, quality: quality))
-                        .foregroundStyle(.secondary)
-                }
-                .font(.system(size: 12, weight: .regular, design: .rounded))
             }
             
             Spacer()
