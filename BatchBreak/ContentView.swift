@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var viewMode: ViewMode = .grid
     @State private var quality: Double = 0.80
     @State private var selectedOutputFormat: OutputFormat = .jpeg
+    @State private var preserveTransparency: Bool = true
     @State private var quickLookURL: URL? = nil
     
     // Keyboard Event Monitor State
@@ -656,6 +657,24 @@ struct ContentView: View {
             
             // Right Side: Format Selector Menu + Convert Button
             HStack(spacing: 12) {
+                // Transparency Checkbox (Left to format selector)
+                if selectedOutputFormat.supportsTransparency {
+                    Toggle(isOn: $preserveTransparency) {
+                        Text("Transparency")
+                            .font(.system(size: 13, weight: .regular, design: .rounded))
+                            .foregroundStyle(.primary)
+                    }
+                    .toggleStyle(.checkbox)
+                    .disabled(isConverting)
+                    .onChange(of: preserveTransparency) { _, _ in
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showSummaryToast = false
+                            isConversionCompleted = false
+                        }
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                }
+                
                 // Format Selector Menu
                 Menu {
                     ForEach(OutputFormat.allCases) { format in
@@ -706,11 +725,11 @@ struct ContentView: View {
                         Text("Convert")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
+                    .frame(width: 76, height: 28)
                 }
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.capsule)
+                .fixedSize()
                 .disabled(isConverting || photos.isEmpty || isConversionCompleted)
                 .opacity(isConversionCompleted ? 0.55 : 1.0)
                 .animation(.easeInOut(duration: 0.2), value: isConversionCompleted)
@@ -969,6 +988,7 @@ struct ContentView: View {
         let photosToConvert = photos
         let targetFormat = selectedOutputFormat
         let targetQuality = quality
+        let targetPreserveTransparency = preserveTransparency
         
         Task {
             await MainActor.run {
@@ -1001,7 +1021,8 @@ struct ContentView: View {
                     destinationBookmark: destinationBookmark,
                     destURL: destURL,
                     format: targetFormat,
-                    quality: targetQuality
+                    quality: targetQuality,
+                    preserveTransparency: targetPreserveTransparency
                 )
                 
                 if outputBytes > 0 {
@@ -1226,7 +1247,39 @@ struct ContentView: View {
         return nil
     }
     
-    nonisolated private static func writeImage(cgImage: CGImage, format: OutputFormat, quality: Double, to destURL: URL) -> Int64 {
+    nonisolated private static func flattenTransparency(cgImage: CGImage) -> CGImage {
+        let width = cgImage.width
+        let height = cgImage.height
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? cgImage.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)
+        
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo.rawValue
+        ) else {
+            return cgImage
+        }
+        
+        context.setFillColor(CGColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        
+        return context.makeImage() ?? cgImage
+    }
+    
+    nonisolated private static func writeImage(cgImage: CGImage, format: OutputFormat, quality: Double, preserveTransparency: Bool, to destURL: URL) -> Int64 {
+        let finalImage: CGImage
+        if !preserveTransparency || !format.supportsTransparency {
+            finalImage = flattenTransparency(cgImage: cgImage)
+        } else {
+            finalImage = cgImage
+        }
+        
         let uti = format.utiIdentifier
         let outputData = NSMutableData()
         if let destinationData = CGImageDestinationCreateWithData(outputData as CFMutableData, uti, 1, nil) {
@@ -1234,7 +1287,7 @@ struct ContentView: View {
             if format == .jpeg || format == .heic {
                 options[kCGImageDestinationLossyCompressionQuality] = quality
             }
-            CGImageDestinationAddImage(destinationData, cgImage, options as CFDictionary)
+            CGImageDestinationAddImage(destinationData, finalImage, options as CFDictionary)
             if CGImageDestinationFinalize(destinationData) {
                 do {
                     let data = outputData as Data
@@ -1247,7 +1300,7 @@ struct ContentView: View {
         }
         
         // Fallback via NSBitmapImageRep representation
-        let rep = NSBitmapImageRep(cgImage: cgImage)
+        let rep = NSBitmapImageRep(cgImage: finalImage)
         let fileData: Data?
         switch format {
         case .jpeg, .heic, .webp:
@@ -1277,7 +1330,8 @@ struct ContentView: View {
         destinationBookmark: Data?,
         destURL: URL,
         format: OutputFormat,
-        quality: Double
+        quality: Double,
+        preserveTransparency: Bool
     ) async -> Int64 {
         return await Task.detached(priority: .userInitiated) {
             var isStale = false
@@ -1397,7 +1451,7 @@ struct ContentView: View {
                             targetURL = destURL
                         }
                         
-                        let bytes = Self.writeImage(cgImage: cgImage, format: format, quality: quality, to: targetURL)
+                        let bytes = Self.writeImage(cgImage: cgImage, format: format, quality: quality, preserveTransparency: preserveTransparency, to: targetURL)
                         totalBytesWritten += bytes
                     }
                     return totalBytesWritten
@@ -1406,7 +1460,7 @@ struct ContentView: View {
                         print("BatchBreak Error: Failed to decode image from \(sourceURL.path)")
                         return 0
                     }
-                    return Self.writeImage(cgImage: cgImage, format: format, quality: quality, to: destURL)
+                    return Self.writeImage(cgImage: cgImage, format: format, quality: quality, preserveTransparency: preserveTransparency, to: destURL)
                 }
             }
         }.value

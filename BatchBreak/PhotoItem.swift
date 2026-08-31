@@ -1909,6 +1909,15 @@ enum OutputFormat: String, CaseIterable, Identifiable, Sendable {
     
     nonisolated var id: String { rawValue }
     
+    nonisolated var supportsTransparency: Bool {
+        switch self {
+        case .jpeg:
+            return false
+        case .png, .heic, .webp, .tiff, .pdf:
+            return true
+        }
+    }
+    
     nonisolated var extensionName: String {
         switch self {
         case .jpeg: return "jpg"
