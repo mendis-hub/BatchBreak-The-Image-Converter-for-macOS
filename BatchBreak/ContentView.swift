@@ -24,7 +24,7 @@ struct ContentView: View {
     @State private var isShowingFileImporter: Bool = false
     @State private var isShowingAboutSheet: Bool = false
     @State private var viewMode: ViewMode = .grid
-    @State private var quality: Double = 0.60
+    @State private var quality: Double = 0.80
     @State private var selectedOutputFormat: OutputFormat = .jpeg
     @State private var quickLookURL: URL? = nil
     

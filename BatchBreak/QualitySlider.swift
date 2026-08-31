@@ -6,9 +6,14 @@
 //
 
 import SwiftUI
+import AppKit
+import AudioToolbox
 
 struct QualitySlider: View {
     @Binding var value: Double // 0.0 to 1.0
+    @State private var isDragging: Bool = false
+    @State private var isHovered: Bool = false
+    @State private var lastFeedbackPercent: Int = -1
     
     var body: some View {
         GeometryReader { geometry in
@@ -39,27 +44,62 @@ struct QualitySlider: View {
                 .clipped()
                 .padding(.horizontal, 6)
                 
-                // Fully Rounded Capsule Handle Thumb (Matching background track)
+                // Apple Native Liquid Glass Handle Thumb
                 Capsule()
-                    .fill(Color.white)
-                    .shadow(color: Color.black.opacity(0.18), radius: 2.5, x: 0, y: 1)
+                    .fill(Color.clear)
+                    .frame(width: thumbWidth, height: trackHeight - 4)
+                    .glassEffect(.regular.interactive(), in: Capsule())
+                    .shadow(color: Color.black.opacity(isDragging ? 0.22 : 0.14), radius: isDragging ? 4 : 2, x: 0, y: 1)
                     .overlay(
                         Capsule()
-                            .stroke(Color.black.opacity(0.12), lineWidth: 0.8)
+                            .stroke(Color.primary.opacity(0.15), lineWidth: 0.8)
                     )
-                    .frame(width: thumbWidth, height: trackHeight - 4)
                     .offset(x: thumbOffset + 2)
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { gesture in
-                                let locationX = gesture.location.x - (thumbWidth / 2)
-                                let newValue = min(max(0, locationX / availableWidth), 1.0)
-                                value = Double(newValue)
-                            }
-                    )
             }
             .frame(height: trackHeight)
+            .contentShape(Capsule())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { gesture in
+                        isDragging = true
+                        let locationX = gesture.location.x - (thumbWidth / 2)
+                        let newValue = min(max(0, locationX / availableWidth), 1.0)
+                        let currentPercent = Int((newValue * 100).rounded())
+                        
+                        if lastFeedbackPercent != currentPercent {
+                            lastFeedbackPercent = currentPercent
+                            playSliderFeedback()
+                        }
+                        
+                        value = Double(newValue)
+                    }
+                    .onEnded { _ in
+                        isDragging = false
+                    }
+            )
+            .onHover { hovering in
+                isHovered = hovering
+                if hovering {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .onAppear {
+                lastFeedbackPercent = Int((value * 100).rounded())
+            }
         }
         .frame(width: 150, height: 24)
     }
+    
+    // MARK: - Audio & Haptic Feedback
+    private func playSliderFeedback() {
+        AudioServicesPlaySystemSound(1104)
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
+    }
+}
+
+#Preview {
+    QualitySlider(value: .constant(0.8))
+        .padding()
 }
