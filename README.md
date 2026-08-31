@@ -9,7 +9,6 @@ Convert hundreds of images at once to JPEG, PNG, HEIC, WEBP, TIFF, or PDF. Just 
 [![Platform](https://img.shields.io/badge/Platform-macOS-black?logo=apple)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6-orange?logo=swift)](https://swift.org)
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-blue)](https://developer.apple.com/xcode/swiftui/)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 </div>
 
