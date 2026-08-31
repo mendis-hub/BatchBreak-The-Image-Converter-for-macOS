@@ -29,18 +29,6 @@ Convert hundreds of images at once to JPEG, PNG, HEIC, WEBP, TIFF, or PDF. Just 
 
 ---
 
-## Requirements
-
-| | Minimum |
-|---|---|
-| **macOS** | 26.0+ (Tahoe) |
-| **Xcode** | 16+ |
-| **Swift** | 6 |
-
-> **Note:** `glassEffect` and `.glassProminent` button styles require **macOS 26 (Tahoe)** or later.
-
----
-
 ## How It Works
 
 1. **Drop files** onto the window, or click **Add Files…** to open a file picker.  
