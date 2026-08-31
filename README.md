@@ -9,7 +9,6 @@ Convert hundreds of images at once to JPEG, PNG, HEIC, WEBP, TIFF, or PDF. Just 
 [![Platform](https://img.shields.io/badge/Platform-macOS-black?logo=apple)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6-orange?logo=swift)](https://swift.org)
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-blue)](https://developer.apple.com/xcode/swiftui/)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 </div>
 
@@ -26,18 +25,6 @@ Convert hundreds of images at once to JPEG, PNG, HEIC, WEBP, TIFF, or PDF. Just 
 - ✨ **Liquid Glass UI** — native macOS look using `glassEffect` materials and capsule buttons
 - 🔒 **Sandbox-safe** — uses security-scoped bookmarks to access files and output folders correctly
 - 🚀 **Async conversion** — runs on a detached task with per-file progress updates so the UI stays responsive
-
----
-
-## Requirements
-
-| | Minimum |
-|---|---|
-| **macOS** | 26.0+ (Tahoe) |
-| **Xcode** | 16+ |
-| **Swift** | 6 |
-
-> **Note:** `glassEffect` and `.glassProminent` button styles require **macOS 26 (Tahoe)** or later.
 
 ---
 
