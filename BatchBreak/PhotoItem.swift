@@ -84,7 +84,7 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                 "PNG", "TIFF", "TIF", "BMP", "PSD", "PDF", "DNG", "RAW", "CR2", "CR3", "RAF", "NRW",
                 "NEF", "SRF", "SR2", "ARW", "ORF", "JP2", "J2K", "JPX", "JPF", "WBMP", "MNG", "PAM",
                 "RAS", "SUN", "SR", "RW4", "RW2", "RWL", "PPM", "PNM", "PGM", "PBM", "PICT", "PCT",
-                "PIC", "SGI", "RGB", "RGBA", "BW", "INT", "INTA", "ICO", "CUR", "SVG", "EPS", "EPSF", "PS"
+                "PIC", "SGI", "RGB", "RGBA", "BW", "INT", "INTA", "ICO", "CUR", "SVG", "EPS", "EPSF", "PS", "AI"
             ].contains(uppercasedExt)
             let bytesPerPixelInput = isInputLossless ? 0.575 : 0.12
             pixels = max(1000.0, Double(fileSize) / bytesPerPixelInput)
@@ -141,6 +141,79 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
             if accessingRoot { rootURL?.stopAccessingSecurityScopedResource() }
         }
         return try action()
+    }
+    
+    // MARK: - Dedicated AI Decoder (Adobe Illustrator)
+    nonisolated static func decodeAI(data: Data, targetSize: CGSize? = nil) -> CGImage? {
+        // Strategy 1: Direct PDFDocument (Modern PDF-compatible AI)
+        if let pdfDoc = PDFDocument(data: data), let page = pdfDoc.page(at: 0) {
+            return renderPDFPage(page: page, targetSize: targetSize)
+        }
+        
+        // Strategy 2: Embedded PDF stream in hybrid AI file (%PDF-)
+        let pdfMagic: [UInt8] = [0x25, 0x50, 0x44, 0x46, 0x2D] // "%PDF-"
+        let bytes = [UInt8](data)
+        if bytes.count > 10 {
+            for i in 0..<(bytes.count - 5) {
+                if bytes[i] == pdfMagic[0] &&
+                   bytes[i+1] == pdfMagic[1] &&
+                   bytes[i+2] == pdfMagic[2] &&
+                   bytes[i+3] == pdfMagic[3] &&
+                   bytes[i+4] == pdfMagic[4] {
+                    let pdfSlice = data.subdata(in: i..<data.count)
+                    if let pdfDoc = PDFDocument(data: pdfSlice), let page = pdfDoc.page(at: 0) {
+                        return renderPDFPage(page: page, targetSize: targetSize)
+                    }
+                    break
+                }
+            }
+        }
+        
+        // Strategy 3: Legacy PostScript AI fallback
+        return decodeEPS(data: data, targetSize: targetSize)
+    }
+    
+    nonisolated static func renderPDFPage(page: PDFPage, targetSize: CGSize? = nil) -> CGImage? {
+        let bounds = page.bounds(for: .mediaBox)
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        
+        let scale: CGFloat
+        let width: Int
+        let height: Int
+        
+        if let target = targetSize, target.width > 0, target.height > 0 {
+            let sx = target.width / bounds.width
+            let sy = target.height / bounds.height
+            scale = min(sx, sy)
+            width = max(1, Int(bounds.width * scale))
+            height = max(1, Int(bounds.height * scale))
+        } else {
+            scale = 2.0
+            width = max(1, Int(bounds.width * scale))
+            height = max(1, Int(bounds.height * scale))
+        }
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        
+        context.setFillColor(CGColor(gray: 1.0, alpha: 1.0))
+        context.fill(CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+        
+        context.saveGState()
+        context.scaleBy(x: scale, y: scale)
+        page.draw(with: .mediaBox, to: context)
+        context.restoreGState()
+        
+        return context.makeImage()
     }
     
     // MARK: - Dedicated EPS Decoder (Encapsulated PostScript)
@@ -1546,7 +1619,7 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         let customFormatExtensions: Set<String> = [
             "WBMP", "MNG", "PAM", "RAS", "SUN", "SR", "PPM", "PNM", "PGM", "PBM",
             "PICT", "PCT", "PIC", "SGI", "RGB", "RGBA", "BW", "INT", "INTA", "ICO", "CUR", "SVG",
-            "EPS", "EPSF", "PS"
+            "EPS", "EPSF", "PS", "AI"
         ]
         
         if customFormatExtensions.contains(ext) || (width == nil || height == nil) {
@@ -1554,6 +1627,18 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                 if ext == "SVG", let svgCGImage = decodeSVG(data: data) {
                     width = svgCGImage.width
                     height = svgCGImage.height
+                } else if ext == "AI" {
+                    if let pdfDoc = PDFDocument(data: data) ?? PDFDocument(url: url) {
+                        pageCount = max(pdfDoc.pageCount, 1)
+                        if let page = pdfDoc.page(at: 0) {
+                            let bounds = page.bounds(for: .mediaBox)
+                            width = Int(bounds.width * 2.0)
+                            height = Int(bounds.height * 2.0)
+                        }
+                    } else if let aiCGImage = decodeAI(data: data) {
+                        width = aiCGImage.width
+                        height = aiCGImage.height
+                    }
                 } else if (ext == "EPS" || ext == "EPSF" || ext == "PS"), let epsCGImage = decodeEPS(data: data) {
                     width = epsCGImage.width
                     height = epsCGImage.height
@@ -1584,6 +1669,9 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                 } else if let epsCGImage = decodeEPS(data: data) {
                     width = epsCGImage.width
                     height = epsCGImage.height
+                } else if let aiCGImage = decodeAI(data: data) {
+                    width = aiCGImage.width
+                    height = aiCGImage.height
                 } else if let nsImage = NSImage(data: data) {
                     let sz = nsImage.size
                     if sz.width > 0 && sz.height > 0 {
@@ -1630,7 +1718,7 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
             "pdf", "psd", "dng", "raw", "cr2", "cr3", "raf", "nrw", "nef", "srf", "sr2", "arw", "orf",
             "jp2", "j2k", "jpx", "jpf", "wbmp", "mng", "pam", "ras", "sun", "sr", "rw4", "rw2", "rwl",
             "ppm", "pnm", "pgm", "pbm", "pict", "pct", "pic", "sgi", "rgb", "rgba", "bw", "int", "inta",
-            "jps", "ico", "cur", "svg", "eps", "epsf", "ps"
+            "jps", "ico", "cur", "svg", "eps", "epsf", "ps", "ai"
         ]
         
         let ignoredFiles: Set<String> = [
@@ -1687,6 +1775,16 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                     if let data = try? Data(contentsOf: self.url),
                        let cgImage = PhotoItem.decodeSVG(data: data, targetSize: targetSize) {
                         return NSImage(cgImage: cgImage, size: targetSize)
+                    }
+                }
+                if extLower == "ai" {
+                    if let data = try? Data(contentsOf: self.url) {
+                        if let pdfDoc = PDFDocument(data: data) ?? PDFDocument(url: self.url), let page = pdfDoc.page(at: 0) {
+                            return page.thumbnail(of: targetSize, for: .mediaBox)
+                        }
+                        if let cgImage = PhotoItem.decodeAI(data: data, targetSize: targetSize) {
+                            return NSImage(cgImage: cgImage, size: targetSize)
+                        }
                     }
                 }
                 if extLower == "eps" || extLower == "epsf" || extLower == "ps" {
@@ -1761,6 +1859,9 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                 }
                 if let data = try? Data(contentsOf: self.url) {
                     if let cgImage = PhotoItem.decodeSVG(data: data, targetSize: targetSize) {
+                        return NSImage(cgImage: cgImage, size: targetSize)
+                    }
+                    if let cgImage = PhotoItem.decodeAI(data: data, targetSize: targetSize) {
                         return NSImage(cgImage: cgImage, size: targetSize)
                     }
                     if let cgImage = PhotoItem.decodeEPS(data: data, targetSize: targetSize) {

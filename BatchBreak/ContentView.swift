@@ -57,6 +57,9 @@ struct ContentView: View {
     
     private var allowedContentTypes: [UTType] {
         var types: [UTType] = [.image, .pdf, .folder, .dng, .rawImage, .ico, .svg]
+        if let aiType = UTType(filenameExtension: "ai") ?? UTType("com.adobe.illustrator.ai-image") ?? UTType("com.adobe.illustrator-image") {
+            types.append(aiType)
+        }
         if let epsType = UTType(filenameExtension: "eps") ?? UTType("com.adobe.encapsulated-postscript") {
             types.append(epsType)
         }
@@ -1082,6 +1085,11 @@ struct ContentView: View {
     
     nonisolated private static func decodeImage(from sourceURL: URL) -> CGImage? {
         let ext = sourceURL.pathExtension.lowercased()
+        if ext == "ai",
+           let inputData = try? Data(contentsOf: sourceURL),
+           let aiCGImage = PhotoItem.decodeAI(data: inputData) {
+            return aiCGImage
+        }
         if (ext == "eps" || ext == "epsf" || ext == "ps"),
            let inputData = try? Data(contentsOf: sourceURL),
            let epsCGImage = PhotoItem.decodeEPS(data: inputData) {
@@ -1158,6 +1166,9 @@ struct ContentView: View {
         if let inputData = try? Data(contentsOf: sourceURL) {
             if let svgCGImage = PhotoItem.decodeSVG(data: inputData) {
                 return svgCGImage
+            }
+            if let aiCGImage = PhotoItem.decodeAI(data: inputData) {
+                return aiCGImage
             }
             if let epsCGImage = PhotoItem.decodeEPS(data: inputData) {
                 return epsCGImage
@@ -1285,11 +1296,38 @@ struct ContentView: View {
             
             return item.withSecurityScopedAccess { () -> Int64 in
                 let sourceURL = item.url
-                let isInputPDF = item.fileExtension.lowercased() == "pdf"
+                let extLower = item.fileExtension.lowercased()
+                let isInputPDFOrAI = extLower == "pdf" || extLower == "ai"
+                let pdfDoc: PDFDocument? = {
+                    if isInputPDFOrAI {
+                        if let doc = PDFDocument(url: sourceURL) { return doc }
+                        if let data = try? Data(contentsOf: sourceURL) {
+                            if let doc = PDFDocument(data: data) { return doc }
+                            let pdfMagic: [UInt8] = [0x25, 0x50, 0x44, 0x46, 0x2D]
+                            let bytes = [UInt8](data)
+                            if bytes.count > 10 {
+                                for i in 0..<(bytes.count - 5) {
+                                    if bytes[i] == pdfMagic[0] &&
+                                       bytes[i+1] == pdfMagic[1] &&
+                                       bytes[i+2] == pdfMagic[2] &&
+                                       bytes[i+3] == pdfMagic[3] &&
+                                       bytes[i+4] == pdfMagic[4] {
+                                        let pdfSlice = data.subdata(in: i..<data.count)
+                                        if let doc = PDFDocument(data: pdfSlice) {
+                                            return doc
+                                        }
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return nil
+                }()
                 
                 // CASE 1: Exporting to PDF format
                 if format == .pdf {
-                    if isInputPDF, let pdfDoc = PDFDocument(url: sourceURL) {
+                    if let pdfDoc = pdfDoc {
                         let pdfData = NSMutableData()
                         if let consumer = CGDataConsumer(data: pdfData as CFMutableData),
                            let firstPage = pdfDoc.page(at: 0) {
@@ -1337,7 +1375,7 @@ struct ContentView: View {
                 }
                 
                 // CASE 2: Exporting to non-PDF Image format (JPEG, PNG, HEIC, WEBP, TIFF)
-                if isInputPDF, let pdfDoc = PDFDocument(url: sourceURL) {
+                if let pdfDoc = pdfDoc {
                     let pageCount = pdfDoc.pageCount
                     var totalBytesWritten: Int64 = 0
                     

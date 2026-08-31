@@ -44,7 +44,7 @@ Convert hundreds of images at once to JPEG, PNG, HEIC, WEBP, TIFF, or PDF. Just 
 ## How It Works
 
 1. **Drop files** onto the window, or click **Add Files…** to open a file picker.  
-   Supported inputs: `JPG`, `PNG`, `HEIC`, `HEIF`, `WEBP`, `TIFF`, `BMP`, `GIF`, `PDF`, `PSD`, `JP2`, `JPE`, `JPS`, `ICO`, `PICT`, `PPM`, `PNM`, `PAM`, `SGI`, `RAS`, `WBMP`, `MNG`, RAW camera files (`DNG`, `CR2`, `CR3`, `RAF`, `ARW`, `NEF`, `NRW`, `ORF`, `RW2`), and entire folders.
+   Supported inputs: `JPG`, `PNG`, `HEIC`, `HEIF`, `WEBP`, `TIFF`, `BMP`, `GIF`, `PDF`, `AI`, `EPS`, `SVG`, `PSD`, `JP2`, `JPE`, `JPS`, `ICO`, `PICT`, `PPM`, `PNM`, `PAM`, `SGI`, `RAS`, `WBMP`, `MNG`, RAW camera files (`DNG`, `CR2`, `CR3`, `RAF`, `ARW`, `NEF`, `NRW`, `ORF`, `RW2`), and entire folders.
 
 2. **Choose a format** from the menu in the bottom bar (`JPEG`, `PNG`, `HEIC`, `WEBP`, `TIFF`, `PDF`).
 
@@ -80,6 +80,9 @@ BatchBreak/
 | WEBP   | ✅ | ✅ | |
 | TIFF   | ✅ | ✅ | Lossless |
 | PDF    | ✅ | ✅ | Multi-page split on export to images |
+| AI     | ✅ | — | Adobe Illustrator (Multi-page artboard split on export) |
+| EPS    | ✅ | — | Vector & raster PostScript (`.eps`, `.epsf`, `.ps`) |
+| SVG    | ✅ | — | Scalable Vector Graphics |
 | JPEG 2000 (JP2) | ✅ | — | |
 | ICO    | ✅ | — | Windows icon format |
 | BMP / WBMP | ✅ | — | |
@@ -94,7 +97,7 @@ BatchBreak/
 | DNG    | ✅ | — | Adobe Digital Negative |
 | CR2 / CR3 | ✅ | — | Canon RAW |
 | RAF    | ✅ | — | Fujifilm RAW |
-| ARW    | ✅ | — | Sony RAW |
+| ARW / SRF | ✅ | — | Sony RAW |
 | NEF / NRW | ✅ | — | Nikon RAW |
 | ORF    | ✅ | — | Olympus RAW |
 | RW2    | ✅ | — | Panasonic RAW |
