@@ -84,7 +84,7 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                 "PNG", "TIFF", "TIF", "BMP", "PSD", "PDF", "DNG", "RAW", "CR2", "CR3", "RAF", "NRW",
                 "NEF", "SRF", "SR2", "ARW", "ORF", "JP2", "J2K", "JPX", "JPF", "WBMP", "MNG", "PAM",
                 "RAS", "SUN", "SR", "RW4", "RW2", "RWL", "PPM", "PNM", "PGM", "PBM", "PICT", "PCT",
-                "PIC", "SGI", "RGB", "RGBA", "BW", "INT", "INTA", "ICO", "CUR"
+                "PIC", "SGI", "RGB", "RGBA", "BW", "INT", "INTA", "ICO", "CUR", "SVG", "EPS", "EPSF", "PS"
             ].contains(uppercasedExt)
             let bytesPerPixelInput = isInputLossless ? 0.575 : 0.12
             pixels = max(1000.0, Double(fileSize) / bytesPerPixelInput)
@@ -141,6 +141,471 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
             if accessingRoot { rootURL?.stopAccessingSecurityScopedResource() }
         }
         return try action()
+    }
+    
+    // MARK: - Dedicated EPS Decoder (Encapsulated PostScript)
+    nonisolated static func decodeEPS(data: Data, targetSize: CGSize? = nil) -> CGImage? {
+        guard data.count >= 4 else { return nil }
+        var postScriptData = data
+        
+        // 1. Binary DOS EPS header check (0xC5D0D3C6)
+        let headerBytes = [UInt8](data.prefix(32))
+        if headerBytes.count >= 30 &&
+           headerBytes[0] == 0xC5 && headerBytes[1] == 0xD0 && headerBytes[2] == 0xD3 && headerBytes[3] == 0xC6 {
+            let readUInt32LE: (Int) -> UInt32 = { off in
+                UInt32(headerBytes[off]) | (UInt32(headerBytes[off+1]) << 8) | (UInt32(headerBytes[off+2]) << 16) | (UInt32(headerBytes[off+3]) << 24)
+            }
+            let psOffset = Int(readUInt32LE(4))
+            let psLength = Int(readUInt32LE(8))
+            let tiffOffset = Int(readUInt32LE(20))
+            let tiffLength = Int(readUInt32LE(24))
+            
+            if tiffOffset > 0 && tiffLength > 0 && tiffOffset + tiffLength <= data.count {
+                let tiffSlice = data.subdata(in: tiffOffset..<tiffOffset + tiffLength)
+                if let source = CGImageSourceCreateWithData(tiffSlice as CFData, nil),
+                   let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                    return cgImage
+                }
+            }
+            
+            if psOffset > 0 && psLength > 0 && psOffset + psLength <= data.count {
+                postScriptData = data.subdata(in: psOffset..<psOffset + psLength)
+            }
+        }
+        
+        // 2. Check for embedded JPEG stream (/DCTDecode / JPEG SOI-EOI markers)
+        let rawBytes = [UInt8](postScriptData)
+        if rawBytes.count > 100 {
+            for i in 0..<(rawBytes.count - 4) {
+                if rawBytes[i] == 0xFF && rawBytes[i+1] == 0xD8 && rawBytes[i+2] == 0xFF {
+                    for j in (i + 100)..<(rawBytes.count - 1) {
+                        if rawBytes[j] == 0xFF && rawBytes[j+1] == 0xD9 {
+                            let jpegSlice = postScriptData.subdata(in: i..<j + 2)
+                            if let source = CGImageSourceCreateWithData(jpegSlice as CFData, nil),
+                               let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                                return cgImage
+                            }
+                            break
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 3. PostScript ASCII / Vector / Raster parsing
+        guard let text = String(data: postScriptData, encoding: .ascii)
+            ?? String(data: postScriptData, encoding: .isoLatin1)
+            ?? String(data: postScriptData, encoding: .utf8) else {
+            return nil
+        }
+        
+        // Parse BoundingBox
+        var parsedBBox: (llx: Double, lly: Double, urx: Double, ury: Double)? = nil
+        let lines = text.components(separatedBy: .newlines)
+        for line in lines.prefix(300) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("%%BoundingBox:") {
+                let parts = trimmed.dropFirst("%%BoundingBox:".count)
+                    .trimmingCharacters(in: .whitespaces)
+                    .split(whereSeparator: { $0.isWhitespace })
+                    .compactMap { Double($0) }
+                if parts.count >= 4 {
+                    parsedBBox = (llx: parts[0], lly: parts[1], urx: parts[2], ury: parts[3])
+                }
+            } else if trimmed.hasPrefix("%%HiResBoundingBox:") || trimmed.hasPrefix("%%ExactBoundingBox:") || trimmed.hasPrefix("%%CropBox:") {
+                let prefixLen = trimmed.hasPrefix("%%HiResBoundingBox:") ? "%%HiResBoundingBox:".count : (trimmed.hasPrefix("%%ExactBoundingBox:") ? "%%ExactBoundingBox:".count : "%%CropBox:".count)
+                let parts = trimmed.dropFirst(prefixLen)
+                    .trimmingCharacters(in: .whitespaces)
+                    .split(whereSeparator: { $0.isWhitespace })
+                    .compactMap { Double($0) }
+                if parts.count >= 4 {
+                    parsedBBox = (llx: parts[0], lly: parts[1], urx: parts[2], ury: parts[3])
+                    break
+                }
+            }
+        }
+        
+        let bbox = parsedBBox ?? (llx: 0.0, lly: 0.0, urx: 612.0, ury: 792.0)
+        let origWidth = max(1.0, bbox.urx - bbox.llx)
+        let origHeight = max(1.0, bbox.ury - bbox.lly)
+        
+        let scale: CGFloat
+        let renderWidth: Int
+        let renderHeight: Int
+        
+        if let target = targetSize, target.width > 0, target.height > 0 {
+            let scaleX = target.width / origWidth
+            let scaleY = target.height / origHeight
+            scale = min(scaleX, scaleY)
+            renderWidth = max(1, Int(round(origWidth * scale)))
+            renderHeight = max(1, Int(round(origHeight * scale)))
+        } else {
+            let supersample: CGFloat = (origWidth < 300 || origHeight < 300) ? 3.0 : 2.0
+            scale = supersample
+            renderWidth = max(1, Int(round(origWidth * scale)))
+            renderHeight = max(1, Int(round(origHeight * scale)))
+        }
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let context = CGContext(
+            data: nil,
+            width: renderWidth,
+            height: renderHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: renderWidth * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return nil
+        }
+        
+        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: renderWidth, height: renderHeight))
+        
+        context.saveGState()
+        context.scaleBy(x: scale, y: scale)
+        context.translateBy(x: CGFloat(-bbox.llx), y: CGFloat(-bbox.lly))
+        
+        var currentPath = CGMutablePath()
+        var definedProcs: [String: [String]] = [
+            "m": ["moveto"],
+            "l": ["lineto"],
+            "c": ["curveto"],
+            "v": ["curveto"],
+            "y": ["curveto"],
+            "h": ["closepath"],
+            "cp": ["closepath"],
+            "f": ["fill"],
+            "F": ["fill"],
+            "s": ["stroke"],
+            "S": ["stroke"],
+            "b": ["closepath", "fill", "stroke"],
+            "B": ["fill", "stroke"],
+            "g": ["setgray"],
+            "G": ["setgray"],
+            "rg": ["setrgbcolor"],
+            "RG": ["setrgbcolor"],
+            "k": ["setcmykcolor"],
+            "K": ["setcmykcolor"],
+            "w": ["setlinewidth"],
+            "W": ["clip"],
+            "j": ["setlinejoin"],
+            "J": ["setlinecap"],
+            "d": ["setdash"]
+        ]
+        
+        var tokens: [String] = []
+        var curIdx = text.startIndex
+        let endIdx = text.endIndex
+        
+        while curIdx < endIdx {
+            let ch = text[curIdx]
+            if ch.isWhitespace {
+                curIdx = text.index(after: curIdx)
+            } else if ch == "%" {
+                while curIdx < endIdx && text[curIdx] != "\n" && text[curIdx] != "\r" {
+                    curIdx = text.index(after: curIdx)
+                }
+            } else if ch == "(" {
+                var str = "("
+                curIdx = text.index(after: curIdx)
+                var depth = 1
+                while curIdx < endIdx && depth > 0 {
+                    let sc = text[curIdx]
+                    if sc == "\\" {
+                        str.append(sc)
+                        curIdx = text.index(after: curIdx)
+                        if curIdx < endIdx { str.append(text[curIdx]); curIdx = text.index(after: curIdx) }
+                    } else if sc == "(" {
+                        depth += 1
+                        str.append(sc)
+                        curIdx = text.index(after: curIdx)
+                    } else if sc == ")" {
+                        depth -= 1
+                        str.append(sc)
+                        curIdx = text.index(after: curIdx)
+                    } else {
+                        str.append(sc)
+                        curIdx = text.index(after: curIdx)
+                    }
+                }
+                tokens.append(str)
+            } else if ch == "{" || ch == "}" || ch == "[" || ch == "]" {
+                tokens.append(String(ch))
+                curIdx = text.index(after: curIdx)
+            } else {
+                let start = curIdx
+                while curIdx < endIdx && !text[curIdx].isWhitespace && text[curIdx] != "%" && text[curIdx] != "{" && text[curIdx] != "}" && text[curIdx] != "[" && text[curIdx] != "]" && text[curIdx] != "(" {
+                    curIdx = text.index(after: curIdx)
+                }
+                tokens.append(String(text[start..<curIdx]))
+            }
+        }
+        
+        var stack: [Any] = []
+        var tokenIdx = 0
+        
+        func executeToken(_ token: String) {
+            if let macro = definedProcs[token] {
+                for t in macro {
+                    executeToken(t)
+                }
+                return
+            }
+            
+            if let num = Double(token) {
+                stack.append(num)
+                return
+            }
+            
+            switch token {
+            case "moveto":
+                if stack.count >= 2, let y = stack.popLast() as? Double, let x = stack.popLast() as? Double {
+                    currentPath.move(to: CGPoint(x: x, y: y))
+                }
+            case "rmoveto":
+                if stack.count >= 2, let dy = stack.popLast() as? Double, let dx = stack.popLast() as? Double {
+                    let cur = currentPath.currentPoint
+                    currentPath.move(to: CGPoint(x: cur.x + CGFloat(dx), y: cur.y + CGFloat(dy)))
+                }
+            case "lineto":
+                if stack.count >= 2, let y = stack.popLast() as? Double, let x = stack.popLast() as? Double {
+                    if currentPath.isEmpty {
+                        currentPath.move(to: CGPoint(x: x, y: y))
+                    } else {
+                        currentPath.addLine(to: CGPoint(x: x, y: y))
+                    }
+                }
+            case "rlineto":
+                if stack.count >= 2, let dy = stack.popLast() as? Double, let dx = stack.popLast() as? Double {
+                    let cur = currentPath.currentPoint
+                    currentPath.addLine(to: CGPoint(x: cur.x + CGFloat(dx), y: cur.y + CGFloat(dy)))
+                }
+            case "curveto":
+                if stack.count >= 6,
+                   let y3 = stack.popLast() as? Double, let x3 = stack.popLast() as? Double,
+                   let y2 = stack.popLast() as? Double, let x2 = stack.popLast() as? Double,
+                   let y1 = stack.popLast() as? Double, let x1 = stack.popLast() as? Double {
+                    if currentPath.isEmpty {
+                        currentPath.move(to: CGPoint(x: x1, y: y1))
+                    }
+                    currentPath.addCurve(to: CGPoint(x: x3, y: y3), control1: CGPoint(x: x1, y: y1), control2: CGPoint(x: x2, y: y2))
+                }
+            case "closepath":
+                currentPath.closeSubpath()
+            case "newpath":
+                currentPath = CGMutablePath()
+            case "stroke":
+                context.addPath(currentPath)
+                context.strokePath()
+                currentPath = CGMutablePath()
+            case "fill":
+                context.addPath(currentPath)
+                context.fillPath()
+                currentPath = CGMutablePath()
+            case "eofill":
+                context.addPath(currentPath)
+                context.drawPath(using: .eoFill)
+                currentPath = CGMutablePath()
+            case "clip":
+                context.addPath(currentPath)
+                context.clip()
+            case "eoclip":
+                context.addPath(currentPath)
+                context.clip(using: .evenOdd)
+            case "rectfill":
+                if stack.count >= 4,
+                   let h = stack.popLast() as? Double, let w = stack.popLast() as? Double,
+                   let y = stack.popLast() as? Double, let x = stack.popLast() as? Double {
+                    context.fill(CGRect(x: x, y: y, width: w, height: h))
+                }
+            case "rectstroke":
+                if stack.count >= 4,
+                   let h = stack.popLast() as? Double, let w = stack.popLast() as? Double,
+                   let y = stack.popLast() as? Double, let x = stack.popLast() as? Double {
+                    context.stroke(CGRect(x: x, y: y, width: w, height: h))
+                }
+            case "rectclip":
+                if stack.count >= 4,
+                   let h = stack.popLast() as? Double, let w = stack.popLast() as? Double,
+                   let y = stack.popLast() as? Double, let x = stack.popLast() as? Double {
+                    context.clip(to: CGRect(x: x, y: y, width: w, height: h))
+                }
+            case "arc":
+                if stack.count >= 5,
+                   let a2 = stack.popLast() as? Double, let a1 = stack.popLast() as? Double,
+                   let r = stack.popLast() as? Double, let y = stack.popLast() as? Double,
+                   let x = stack.popLast() as? Double {
+                    let rad1 = a1 * .pi / 180.0
+                    let rad2 = a2 * .pi / 180.0
+                    currentPath.addArc(center: CGPoint(x: x, y: y), radius: CGFloat(r), startAngle: CGFloat(rad1), endAngle: CGFloat(rad2), clockwise: false)
+                }
+            case "arcn":
+                if stack.count >= 5,
+                   let a2 = stack.popLast() as? Double, let a1 = stack.popLast() as? Double,
+                   let r = stack.popLast() as? Double, let y = stack.popLast() as? Double,
+                   let x = stack.popLast() as? Double {
+                    let rad1 = a1 * .pi / 180.0
+                    let rad2 = a2 * .pi / 180.0
+                    currentPath.addArc(center: CGPoint(x: x, y: y), radius: CGFloat(r), startAngle: CGFloat(rad1), endAngle: CGFloat(rad2), clockwise: true)
+                }
+            case "setgray":
+                if let g = stack.popLast() as? Double {
+                    context.setFillColor(CGColor(gray: CGFloat(g), alpha: 1.0))
+                    context.setStrokeColor(CGColor(gray: CGFloat(g), alpha: 1.0))
+                }
+            case "setrgbcolor":
+                if stack.count >= 3,
+                   let b = stack.popLast() as? Double, let g = stack.popLast() as? Double, let r = stack.popLast() as? Double {
+                    context.setFillColor(CGColor(red: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: 1.0))
+                    context.setStrokeColor(CGColor(red: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: 1.0))
+                }
+            case "setcmykcolor":
+                if stack.count >= 4,
+                   let k = stack.popLast() as? Double, let y = stack.popLast() as? Double,
+                   let m = stack.popLast() as? Double, let c = stack.popLast() as? Double {
+                    let r = (1.0 - c) * (1.0 - k)
+                    let g = (1.0 - m) * (1.0 - k)
+                    let b = (1.0 - y) * (1.0 - k)
+                    context.setFillColor(CGColor(red: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: 1.0))
+                    context.setStrokeColor(CGColor(red: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: 1.0))
+                }
+            case "setlinewidth":
+                if let w = stack.popLast() as? Double {
+                    context.setLineWidth(CGFloat(w))
+                }
+            case "setlinejoin":
+                if let j = stack.popLast() as? Double {
+                    let join: CGLineJoin = j == 1 ? .round : (j == 2 ? .bevel : .miter)
+                    context.setLineJoin(join)
+                }
+            case "setlinecap":
+                if let cap = stack.popLast() as? Double {
+                    let lineCap: CGLineCap = cap == 1 ? .round : (cap == 2 ? .square : .butt)
+                    context.setLineCap(lineCap)
+                }
+            case "setmiterlimit":
+                if let limit = stack.popLast() as? Double {
+                    context.setMiterLimit(CGFloat(limit))
+                }
+            case "gsave":
+                context.saveGState()
+            case "grestore":
+                context.restoreGState()
+            case "translate":
+                if stack.count >= 2, let ty = stack.popLast() as? Double, let tx = stack.popLast() as? Double {
+                    context.translateBy(x: CGFloat(tx), y: CGFloat(ty))
+                }
+            case "scale":
+                if stack.count >= 2, let sy = stack.popLast() as? Double, let sx = stack.popLast() as? Double {
+                    context.scaleBy(x: CGFloat(sx), y: CGFloat(sy))
+                }
+            case "rotate":
+                if let angle = stack.popLast() as? Double {
+                    let radians = angle * .pi / 180.0
+                    context.rotate(by: CGFloat(radians))
+                }
+            case "pop":
+                _ = stack.popLast()
+            case "dup":
+                if let top = stack.last {
+                    stack.append(top)
+                }
+            case "exch":
+                if stack.count >= 2 {
+                    let a = stack.removeLast()
+                    let b = stack.removeLast()
+                    stack.append(a)
+                    stack.append(b)
+                }
+            case "def", "bind":
+                break
+            default:
+                if token.hasPrefix("/") {
+                    stack.append(token)
+                }
+            }
+        }
+        
+        while tokenIdx < tokens.count {
+            let t = tokens[tokenIdx]
+            if t.hasPrefix("/") && tokenIdx + 2 < tokens.count && tokens[tokenIdx + 1] == "{" {
+                let name = String(t.dropFirst())
+                tokenIdx += 2
+                var bodyTokens: [String] = []
+                var depth = 1
+                while tokenIdx < tokens.count && depth > 0 {
+                    let bt = tokens[tokenIdx]
+                    if bt == "{" { depth += 1 }
+                    else if bt == "}" {
+                        depth -= 1
+                        if depth == 0 { tokenIdx += 1; break }
+                    }
+                    bodyTokens.append(bt)
+                    tokenIdx += 1
+                }
+                while tokenIdx < tokens.count && (tokens[tokenIdx] == "bind" || tokens[tokenIdx] == "def") {
+                    tokenIdx += 1
+                }
+                definedProcs[name] = bodyTokens
+                continue
+            }
+            executeToken(t)
+            tokenIdx += 1
+        }
+        
+        context.restoreGState()
+        return context.makeImage()
+    }
+    
+    // MARK: - Dedicated SVG Decoder
+    nonisolated static func decodeSVG(data: Data, targetSize: CGSize? = nil) -> CGImage? {
+        guard let nsImage = NSImage(data: data) else { return nil }
+        var imageSize = nsImage.size
+        if imageSize.width <= 0 || imageSize.height <= 0 {
+            imageSize = CGSize(width: 1024, height: 1024)
+        }
+        
+        let destSize: CGSize
+        if let target = targetSize, target.width > 0, target.height > 0 {
+            let widthRatio = target.width / imageSize.width
+            let heightRatio = target.height / imageSize.height
+            let scale = min(widthRatio, heightRatio)
+            destSize = CGSize(width: max(1, imageSize.width * scale), height: max(1, imageSize.height * scale))
+        } else {
+            let renderScale: CGFloat = 2.0
+            destSize = CGSize(width: max(1, imageSize.width * renderScale), height: max(1, imageSize.height * renderScale))
+        }
+        
+        let width = Int(destSize.width)
+        let height = Int(destSize.height)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            var rect = CGRect(origin: .zero, size: destSize)
+            return nsImage.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+        }
+        
+        let graphicsContext = NSGraphicsContext(cgContext: context, flipped: false)
+        let currentContext = NSGraphicsContext.current
+        NSGraphicsContext.current = graphicsContext
+        nsImage.draw(in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)),
+                     from: .zero,
+                     operation: .sourceOver,
+                     fraction: 1.0)
+        NSGraphicsContext.current = currentContext
+        
+        return context.makeImage()
     }
     
     // MARK: - Dedicated WBMP Decoder
@@ -1080,12 +1545,19 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         
         let customFormatExtensions: Set<String> = [
             "WBMP", "MNG", "PAM", "RAS", "SUN", "SR", "PPM", "PNM", "PGM", "PBM",
-            "PICT", "PCT", "PIC", "SGI", "RGB", "RGBA", "BW", "INT", "INTA", "ICO", "CUR"
+            "PICT", "PCT", "PIC", "SGI", "RGB", "RGBA", "BW", "INT", "INTA", "ICO", "CUR", "SVG",
+            "EPS", "EPSF", "PS"
         ]
         
         if customFormatExtensions.contains(ext) || (width == nil || height == nil) {
             if let data = try? Data(contentsOf: url) {
-                if let wbmpCGImage = decodeWBMP(data: data) {
+                if ext == "SVG", let svgCGImage = decodeSVG(data: data) {
+                    width = svgCGImage.width
+                    height = svgCGImage.height
+                } else if (ext == "EPS" || ext == "EPSF" || ext == "PS"), let epsCGImage = decodeEPS(data: data) {
+                    width = epsCGImage.width
+                    height = epsCGImage.height
+                } else if let wbmpCGImage = decodeWBMP(data: data) {
                     width = wbmpCGImage.width
                     height = wbmpCGImage.height
                 } else if let mngCGImage = decodeMNG(data: data) {
@@ -1109,6 +1581,15 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                 } else if let icoCGImage = decodeICO(data: data) {
                     width = icoCGImage.width
                     height = icoCGImage.height
+                } else if let epsCGImage = decodeEPS(data: data) {
+                    width = epsCGImage.width
+                    height = epsCGImage.height
+                } else if let nsImage = NSImage(data: data) {
+                    let sz = nsImage.size
+                    if sz.width > 0 && sz.height > 0 {
+                        width = Int(sz.width)
+                        height = Int(sz.height)
+                    }
                 }
             }
         }
@@ -1136,13 +1617,25 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         )
     }
     
-    nonisolated static func scanForImages(in url: URL) -> [URL] {
+    nonisolated static func scanForImagesDetailed(in url: URL) -> (validURLs: [URL], unsupportedNames: [String]) {
         let accessing = url.startAccessingSecurityScopedResource()
         defer {
             if accessing {
                 url.stopAccessingSecurityScopedResource()
             }
         }
+        
+        let validExtensions: Set<String> = [
+            "jpg", "jpeg", "jpe", "png", "heic", "heif", "webp", "tiff", "tif", "bmp", "gif",
+            "pdf", "psd", "dng", "raw", "cr2", "cr3", "raf", "nrw", "nef", "srf", "sr2", "arw", "orf",
+            "jp2", "j2k", "jpx", "jpf", "wbmp", "mng", "pam", "ras", "sun", "sr", "rw4", "rw2", "rwl",
+            "ppm", "pnm", "pgm", "pbm", "pict", "pct", "pic", "sgi", "rgb", "rgba", "bw", "int", "inta",
+            "jps", "ico", "cur", "svg", "eps", "epsf", "ps"
+        ]
+        
+        let ignoredFiles: Set<String> = [
+            ".ds_store", "thumbs.db", "desktop.ini", ".localized"
+        ]
         
         let fileManager = FileManager.default
         var isDir: ObjCBool = false
@@ -1153,42 +1646,55 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                     includingPropertiesForKeys: [.isRegularFileKey],
                     options: [.skipsHiddenFiles]
                 ) else {
-                    return []
+                    return ([], [url.lastPathComponent])
                 }
                 var imageURLs: [URL] = []
-                let validExtensions = [
-                    "jpg", "jpeg", "jpe", "png", "heic", "heif", "webp", "tiff", "tif", "bmp", "gif",
-                    "pdf", "psd", "dng", "raw", "cr2", "cr3", "raf", "nrw", "nef", "srf", "sr2", "arw", "orf",
-                    "jp2", "j2k", "jpx", "jpf", "wbmp", "mng", "pam", "ras", "sun", "sr", "rw4", "rw2", "rwl",
-                    "ppm", "pnm", "pgm", "pbm", "pict", "pct", "pic", "sgi", "rgb", "rgba", "bw", "int", "inta",
-                    "jps", "ico", "cur"
-                ]
                 for case let fileURL as URL in enumerator {
-                    if validExtensions.contains(fileURL.pathExtension.lowercased()) {
+                    let ext = fileURL.pathExtension.lowercased()
+                    if validExtensions.contains(ext) {
                         imageURLs.append(fileURL)
                     }
                 }
-                return imageURLs
+                if imageURLs.isEmpty {
+                    return ([], [url.lastPathComponent])
+                }
+                return (imageURLs, [])
             } else {
-                let validExtensions = [
-                    "jpg", "jpeg", "jpe", "png", "heic", "heif", "webp", "tiff", "tif", "bmp", "gif",
-                    "pdf", "psd", "dng", "raw", "cr2", "cr3", "raf", "nrw", "nef", "srf", "sr2", "arw", "orf",
-                    "jp2", "j2k", "jpx", "jpf", "wbmp", "mng", "pam", "ras", "sun", "sr", "rw4", "rw2", "rwl",
-                    "ppm", "pnm", "pgm", "pbm", "pict", "pct", "pic", "sgi", "rgb", "rgba", "bw", "int", "inta",
-                    "jps", "ico", "cur"
-                ]
-                if validExtensions.contains(url.pathExtension.lowercased()) {
-                    return [url]
+                let filename = url.lastPathComponent
+                if ignoredFiles.contains(filename.lowercased()) || filename.hasPrefix(".") {
+                    return ([], [])
+                }
+                let ext = url.pathExtension.lowercased()
+                if validExtensions.contains(ext) {
+                    return ([url], [])
+                } else {
+                    return ([], [filename])
                 }
             }
         }
-        return []
+        return ([], [url.lastPathComponent])
+    }
+    
+    nonisolated static func scanForImages(in url: URL) -> [URL] {
+        return scanForImagesDetailed(in: url).validURLs
     }
     
     nonisolated func loadThumbnailAsync(targetSize: CGSize = CGSize(width: 320, height: 320), completion: @escaping @Sendable (NSImage?) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             let img = self.withSecurityScopedAccess { () -> NSImage? in
                 let extLower = self.fileExtension.lowercased()
+                if extLower == "svg" {
+                    if let data = try? Data(contentsOf: self.url),
+                       let cgImage = PhotoItem.decodeSVG(data: data, targetSize: targetSize) {
+                        return NSImage(cgImage: cgImage, size: targetSize)
+                    }
+                }
+                if extLower == "eps" || extLower == "epsf" || extLower == "ps" {
+                    if let data = try? Data(contentsOf: self.url),
+                       let cgImage = PhotoItem.decodeEPS(data: data, targetSize: targetSize) {
+                        return NSImage(cgImage: cgImage, size: targetSize)
+                    }
+                }
                 if extLower == "pdf" {
                     if let pdfDoc = PDFDocument(url: self.url), let page = pdfDoc.page(at: 0) {
                         return page.thumbnail(of: targetSize, for: .mediaBox)
@@ -1254,6 +1760,12 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                     }
                 }
                 if let data = try? Data(contentsOf: self.url) {
+                    if let cgImage = PhotoItem.decodeSVG(data: data, targetSize: targetSize) {
+                        return NSImage(cgImage: cgImage, size: targetSize)
+                    }
+                    if let cgImage = PhotoItem.decodeEPS(data: data, targetSize: targetSize) {
+                        return NSImage(cgImage: cgImage, size: targetSize)
+                    }
                     if let cgImage = PhotoItem.decodeWBMP(data: data) {
                         return NSImage(cgImage: cgImage, size: targetSize)
                     }

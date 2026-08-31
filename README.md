@@ -44,7 +44,7 @@ Convert hundreds of images at once to JPEG, PNG, HEIC, WEBP, TIFF, or PDF. Just 
 ## How It Works
 
 1. **Drop files** onto the window, or click **Add Files…** to open a file picker.  
-   Supported inputs: `JPG`, `PNG`, `HEIC`, `WEBP`, `TIFF`, `BMP`, `GIF`, `PDF`, `PSD`, and entire folders.
+   Supported inputs: `JPG`, `PNG`, `HEIC`, `WEBP`, `TIFF`, `BMP`, `GIF`, `PDF`, `PSD`, `EPS`, `SVG`, and entire folders.
 
 2. **Choose a format** from the menu in the bottom bar (`JPEG`, `PNG`, `HEIC`, `WEBP`, `TIFF`, `PDF`).
 
@@ -80,6 +80,8 @@ BatchBreak/
 | WEBP   | ✅ | ✅ | |
 | TIFF   | ✅ | ✅ | Lossless |
 | PDF    | ✅ | ✅ | Multi-page split on export to images |
+| EPS    | ✅ | — | Vector & raster PostScript (`.eps`, `.epsf`, `.ps`); converts to any format |
+| SVG    | ✅ | — | Vector graphic; converts to any output format |
 | PSD    | ✅ | — | Read-only; converts to any output format |
 | BMP, GIF | ✅ | — | Accepted as input |
 

@@ -31,6 +31,10 @@ struct ContentView: View {
     // Keyboard Event Monitor State
     @State private var keyMonitor: Any? = nil
     
+    // MARK: - Error Toast State
+    @State private var errorMessage: String? = nil
+    @State private var errorDismissTask: Task<Void, Never>? = nil
+    
     // MARK: - Conversion & Summary State
     @State private var isConverting: Bool = false
     @State private var convertedCount: Int = 0
@@ -52,7 +56,19 @@ struct ContentView: View {
     ]
     
     private var allowedContentTypes: [UTType] {
-        var types: [UTType] = [.image, .pdf, .folder, .dng, .rawImage, .ico]
+        var types: [UTType] = [.image, .pdf, .folder, .dng, .rawImage, .ico, .svg]
+        if let epsType = UTType(filenameExtension: "eps") ?? UTType("com.adobe.encapsulated-postscript") {
+            types.append(epsType)
+        }
+        if let epsfType = UTType(filenameExtension: "epsf") {
+            types.append(epsfType)
+        }
+        if let psType = UTType(filenameExtension: "ps") ?? UTType("com.adobe.postscript") {
+            types.append(psType)
+        }
+        if let svgType = UTType(filenameExtension: "svg") ?? UTType("public.svg-image") {
+            types.append(svgType)
+        }
         if let icoType = UTType(filenameExtension: "ico") ?? UTType("com.microsoft.ico") ?? UTType("public.ico") {
             types.append(icoType)
         }
@@ -278,6 +294,15 @@ struct ContentView: View {
                     bottomControlBar
                 }
             }
+            
+            // MARK: - Floating Error Message Toast
+            if let errorMsg = errorMessage {
+                floatingErrorToast(message: errorMsg)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, photos.isEmpty ? 28 : 68)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(100)
+            }
         }
         .frame(minWidth: 720, minHeight: 520)
         .ignoresSafeArea()
@@ -364,6 +389,7 @@ struct ContentView: View {
                             selectedPhotoIDs.removeAll()
                             showSummaryToast = false
                             isConversionCompleted = false
+                            errorMessage = nil
                         }
                     }) {
                         Text("Clear")
@@ -436,6 +462,42 @@ struct ContentView: View {
                 .fill(Color.primary.opacity(0.08))
                 .frame(height: 1),
             alignment: .bottom
+        )
+    }
+    
+    // MARK: - Floating Error Message Toast
+    private func floatingErrorToast(message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Color.orange)
+            
+            Text(message)
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+            
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    errorMessage = nil
+                }
+            }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(4)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 10)
+        .padding(.vertical, 9)
+        .glassEffect(.regular, in: Capsule())
+        .shadow(color: Color.black.opacity(0.16), radius: 12, x: 0, y: 4)
+        .overlay(
+            Capsule()
+                .stroke(Color.orange.opacity(0.35), lineWidth: 1.0)
         )
     }
     
@@ -812,20 +874,43 @@ struct ContentView: View {
         return formatter.string(fromByteCount: estimatedBytes)
     }
     
+    private func showFloatingError(_ message: String) {
+        errorDismissTask?.cancel()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+            errorMessage = message
+        }
+        errorDismissTask = Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            if !Task.isCancelled {
+                await MainActor.run {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        if errorMessage == message {
+                            errorMessage = nil
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     private func addFiles(urls: [URL]) {
         withAnimation(.easeInOut(duration: 0.2)) {
             showSummaryToast = false
             isConversionCompleted = false
         }
         var newPhotos: [PhotoItem] = []
+        var unsupportedFiles: [String] = []
+        
         for url in urls {
             let accessing = url.startAccessingSecurityScopedResource()
             let bookmarkData = (try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil))
                 ?? (try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil))
             
-            let scanned = PhotoItem.scanForImages(in: url)
+            let (scanned, unsupported) = PhotoItem.scanForImagesDetailed(in: url)
+            unsupportedFiles.append(contentsOf: unsupported)
+            
             for fileURL in scanned {
-                if !photos.contains(where: { $0.url == fileURL }) {
+                if !photos.contains(where: { $0.url == fileURL }) && !newPhotos.contains(where: { $0.url == fileURL }) {
                     newPhotos.append(PhotoItem.from(url: fileURL, bookmarkData: bookmarkData))
                 }
             }
@@ -834,8 +919,23 @@ struct ContentView: View {
             }
         }
         
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-            photos.append(contentsOf: newPhotos)
+        if !unsupportedFiles.isEmpty {
+            let msg: String
+            if unsupportedFiles.count == 1 {
+                msg = "“\(unsupportedFiles[0])” is not a supported image format."
+            } else if unsupportedFiles.count <= 3 {
+                let list = unsupportedFiles.map { "“\($0)”" }.joined(separator: ", ")
+                msg = "\(list) are not supported image formats."
+            } else {
+                msg = "\(unsupportedFiles.count) unsupported files were skipped."
+            }
+            showFloatingError(msg)
+        }
+        
+        if !newPhotos.isEmpty {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                photos.append(contentsOf: newPhotos)
+            }
         }
     }
     
@@ -875,6 +975,7 @@ struct ContentView: View {
                     totalConversionCount = photosToConvert.count
                     showSummaryToast = false
                     isConversionCompleted = false
+                    errorMessage = nil
                 }
             }
             
@@ -981,6 +1082,16 @@ struct ContentView: View {
     
     nonisolated private static func decodeImage(from sourceURL: URL) -> CGImage? {
         let ext = sourceURL.pathExtension.lowercased()
+        if (ext == "eps" || ext == "epsf" || ext == "ps"),
+           let inputData = try? Data(contentsOf: sourceURL),
+           let epsCGImage = PhotoItem.decodeEPS(data: inputData) {
+            return epsCGImage
+        }
+        if ext == "svg",
+           let inputData = try? Data(contentsOf: sourceURL),
+           let svgCGImage = PhotoItem.decodeSVG(data: inputData) {
+            return svgCGImage
+        }
         if (ext == "ico" || ext == "cur"),
            let inputData = try? Data(contentsOf: sourceURL),
            let icoCGImage = PhotoItem.decodeICO(data: inputData) {
@@ -1045,6 +1156,12 @@ struct ContentView: View {
             }
         }
         if let inputData = try? Data(contentsOf: sourceURL) {
+            if let svgCGImage = PhotoItem.decodeSVG(data: inputData) {
+                return svgCGImage
+            }
+            if let epsCGImage = PhotoItem.decodeEPS(data: inputData) {
+                return epsCGImage
+            }
             if let icoCGImage = PhotoItem.decodeICO(data: inputData) {
                 return icoCGImage
             }
