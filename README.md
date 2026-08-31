@@ -30,14 +30,18 @@ Convert hundreds of images at once to JPEG, PNG, HEIC, WEBP, TIFF, or PDF. Just 
 
 ## Screenshots
 
-<p>
-  <img src="Screenshots/SCR-20260901-dknn.png" width="280">
-  <img src="Screenshots/SCR-20260901-dkpa.png" width="280">
-  <img src="Screenshots/SCR-20260901-dkzq.jpeg" width="280">
-  <img src="Screenshots/SCR-20260901-dlbf.jpeg" width="280">
-  <img src="Screenshots/SCR-20260901-dlec.jpeg" width="280">
-  <img src="Screenshots/SCR-20260901-dlfm.png" width="280">
-</p>
+<table>
+  <tr>
+    <td><img src="Screenshots/SCR-20260901-dsbi.png" width="260"></td>
+    <td><img src="Screenshots/SCR-20260901-dsnq.png" width="260"></td>
+    <td><img src="Screenshots/SCR-20260901-dtch.png" width="260"></td>
+  </tr>
+  <tr>
+    <td><img src="Screenshots/SCR-20260901-dsdy.png" width="260"></td>
+    <td><img src="Screenshots/SCR-20260901-dsty.png" width="260"></td>
+    <td><img src="Screenshots/SCR-20260901-dtey.png" width="260"></td>
+  </tr>
+</table>
 
 ---
 
