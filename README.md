@@ -28,10 +28,23 @@ Convert hundreds of images at once to JPEG, PNG, HEIC, WEBP, TIFF, or PDF. Just 
 
 ---
 
+## Screenshots
+
+<p>
+  <img src="Screenshots/SCR-20260901-dknn.png" width="280">
+  <img src="Screenshots/SCR-20260901-dkpa.png" width="280">
+  <img src="Screenshots/SCR-20260901-dkzq.jpeg" width="280">
+  <img src="Screenshots/SCR-20260901-dlbf.jpeg" width="280">
+  <img src="Screenshots/SCR-20260901-dlec.jpeg" width="280">
+  <img src="Screenshots/SCR-20260901-dlfm.png" width="280">
+</p>
+
+---
+
 ## How It Works
 
 1. **Drop files** onto the window, or click **Add Files…** to open a file picker.  
-   Supported inputs: `JPG`, `PNG`, `HEIC`, `HEIF`, `WEBP`, `TIFF`, `BMP`, `GIF`, `PDF`, `AI`, `EPS`, `SVG`, `PSD`, `JP2`, `JPE`, `JPS`, `ICO`, `PICT`, `PPM`, `PNM`, `PAM`, `SGI`, `RAS`, `WBMP`, `MNG`, RAW camera files (`DNG`, `CR2`, `CR3`, `RAF`, `ARW`, `NEF`, `NRW`, `ORF`, `RW2`), and entire folders.
+   Supported inputs: `JPG`, `PNG`, `HEIC`, `HEIF`, `WEBP`, `TIFF`, `BMP`, `GIF`, `PDF`, `AI`, `EPS`, `SVG`, `PSD`, `JP2`, `JPE`, `JPS`, `ICO`, `PICT`, `PPM`, `PNM`, `PAM`, `SGI`, `RAS`, `WBMP`, `MNG`, RAW camera files (`DNG`, `CR2`, `CR3`, `RAF`, `ARW`, `SRF`, `NEF`, `NRW`, `ORF`, `RW2`), and entire folders.
 
 2. **Choose a format** from the menu in the bottom bar (`JPEG`, `PNG`, `HEIC`, `WEBP`, `TIFF`, `PDF`).
 
@@ -91,6 +104,18 @@ BatchBreak/
 
 ---
 
+## Requirements
+
+| | Minimum |
+|---|---|
+| **macOS** | 26.0+ (Tahoe) |
+| **Xcode** | 16+ |
+| **Swift** | 6 |
+
+> **Note:** `glassEffect` and `.glassProminent` button styles require **macOS 26 (Tahoe)** or later.
+
+---
+
 ## License & Usage
 
 The App: You are completely free to download and use this macOS app for any personal or commercial purpose.
@@ -99,3 +124,9 @@ The Code: This is a source-available project, not open-source. The source code i
 
 If you would like to use snippets of this code or contribute, please contact me at k.madusanka1@gmail.com.
 See [LICENSE](LICENSE) for details.
+
+---
+
+<div align="center">
+Made with ❤️ for macOS · Built with SwiftUI
+</div>
