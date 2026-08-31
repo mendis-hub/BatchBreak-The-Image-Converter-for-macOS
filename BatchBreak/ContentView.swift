@@ -219,83 +219,82 @@ struct ContentView: View {
                 emptyStateView
             } else {
                 // MARK: - Main Photo Gallery & Converter Layout
-                VStack(spacing: 0) {
-                    // Main Photo Grid/List Content Area with Floating Badges/Summary & Liquid Glass Header
-                    ZStack(alignment: .top) {
-                        ScrollView {
-                            if viewMode == .grid {
-                                LazyVGrid(columns: gridColumns, spacing: 20) {
-                                    ForEach(photos) { item in
-                                        PhotoCardView(
-                                            item: item,
-                                            format: selectedOutputFormat,
-                                            quality: quality,
-                                            isSelected: selectedPhotoIDs.contains(item.id),
-                                            onSelect: { isCommandPressed in
-                                                handleSelect(item: item, isCommandPressed: isCommandPressed)
-                                            },
-                                            onQuickLook: {
-                                                quickLookURL = item.url
-                                            },
-                                            onDelete: {
-                                                removePhotos([item])
-                                            }
-                                        )
-                                    }
+                ZStack(alignment: .top) {
+                    ScrollView {
+                        if viewMode == .grid {
+                            LazyVGrid(columns: gridColumns, spacing: 20) {
+                                ForEach(photos) { item in
+                                    PhotoCardView(
+                                        item: item,
+                                        format: selectedOutputFormat,
+                                        quality: quality,
+                                        isSelected: selectedPhotoIDs.contains(item.id),
+                                        onSelect: { isCommandPressed in
+                                            handleSelect(item: item, isCommandPressed: isCommandPressed)
+                                        },
+                                        onQuickLook: {
+                                            quickLookURL = item.url
+                                        },
+                                        onDelete: {
+                                            removePhotos([item])
+                                        }
+                                    )
                                 }
-                                .padding(.horizontal, 24)
-                                .padding(.top, 80)
-                                .padding(.bottom, 56)
-                            } else {
-                                LazyVStack(spacing: 10) {
-                                    ForEach(photos) { item in
-                                        PhotoListRowView(
-                                            item: item,
-                                            format: selectedOutputFormat,
-                                            quality: quality,
-                                            isSelected: selectedPhotoIDs.contains(item.id),
-                                            onSelect: { isCommandPressed in
-                                                handleSelect(item: item, isCommandPressed: isCommandPressed)
-                                            },
-                                            onQuickLook: {
-                                                quickLookURL = item.url
-                                            },
-                                            onDelete: {
-                                                removePhotos([item])
-                                            }
-                                        )
-                                    }
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.top, 80)
+                            .padding(.bottom, 76)
+                        } else {
+                            LazyVStack(spacing: 10) {
+                                ForEach(photos) { item in
+                                    PhotoListRowView(
+                                        item: item,
+                                        format: selectedOutputFormat,
+                                        quality: quality,
+                                        isSelected: selectedPhotoIDs.contains(item.id),
+                                        onSelect: { isCommandPressed in
+                                            handleSelect(item: item, isCommandPressed: isCommandPressed)
+                                        },
+                                        onQuickLook: {
+                                            quickLookURL = item.url
+                                        },
+                                        onDelete: {
+                                            removePhotos([item])
+                                        }
+                                    )
                                 }
-                                .padding(.horizontal, 24)
-                                .padding(.top, 80)
-                                .padding(.bottom, 56)
                             }
+                            .padding(.horizontal, 24)
+                            .padding(.top, 80)
+                            .padding(.bottom, 76)
                         }
-                        .onTapGesture {
-                            selectedPhotoIDs.removeAll()
-                        }
-                        
-                        // Top Header Bar with Liquid Glass Background Material
-                        topHeaderBar
-                        
-                        // MARK: - Bottom Floating Overlay (Summary Toast / Progress Bar / Photo Count Badge)
-                        Group {
-                            if isConverting {
-                                conversionProgressToast
-                            } else if showSummaryToast {
-                                floatingSummaryToast
-                            } else {
-                                floatingPhotoCountBadge
-                            }
-                        }
-                        .frame(maxHeight: .infinity, alignment: .bottom)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .animation(.spring(response: 0.38, dampingFraction: 0.78), value: isConverting)
-                        .animation(.spring(response: 0.38, dampingFraction: 0.78), value: showSummaryToast)
+                    }
+                    .onTapGesture {
+                        selectedPhotoIDs.removeAll()
                     }
                     
-                    // Bottom Conversion Control Bar
+                    // Top Header Bar with Liquid Glass Background Material
+                    topHeaderBar
+                    
+                    // MARK: - Bottom Floating Overlay (Summary Toast / Progress Bar / Photo Count Badge)
+                    Group {
+                        if isConverting {
+                            conversionProgressToast
+                        } else if showSummaryToast {
+                            floatingSummaryToast
+                        } else {
+                            floatingPhotoCountBadge
+                        }
+                    }
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 56)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .animation(.spring(response: 0.38, dampingFraction: 0.78), value: isConverting)
+                    .animation(.spring(response: 0.38, dampingFraction: 0.78), value: showSummaryToast)
+                    
+                    // Bottom Conversion Control Bar with Liquid Glass Background Material
                     bottomControlBar
+                        .frame(maxHeight: .infinity, alignment: .bottom)
                 }
             }
             
@@ -744,14 +743,12 @@ struct ContentView: View {
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 14)
-        .background(
-            Color(NSColor.windowBackgroundColor)
-                .overlay(
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.06))
-                        .frame(height: 1),
-                    alignment: .top
-                )
+        .glassEffect(.regular, in: Rectangle())
+        .overlay(
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(height: 1),
+            alignment: .top
         )
     }
     

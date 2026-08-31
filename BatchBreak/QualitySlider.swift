@@ -44,15 +44,15 @@ struct QualitySlider: View {
                 .clipped()
                 .padding(.horizontal, 6)
                 
-                // Apple Native Liquid Glass Handle Thumb
+                // Apple Native Liquid Glass Handle Thumb (White Glass)
                 Capsule()
-                    .fill(Color.clear)
+                    .fill(Color.white)
                     .frame(width: thumbWidth, height: trackHeight - 4)
                     .glassEffect(.regular.interactive(), in: Capsule())
-                    .shadow(color: Color.black.opacity(isDragging ? 0.22 : 0.14), radius: isDragging ? 4 : 2, x: 0, y: 1)
+                    .shadow(color: Color.black.opacity(isDragging ? 0.25 : 0.16), radius: isDragging ? 4 : 2, x: 0, y: 1)
                     .overlay(
                         Capsule()
-                            .stroke(Color.primary.opacity(0.15), lineWidth: 0.8)
+                            .stroke(Color.white.opacity(0.6), lineWidth: 0.8)
                     )
                     .offset(x: thumbOffset + 2)
             }
