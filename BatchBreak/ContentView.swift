@@ -48,6 +48,7 @@ struct ContentView: View {
     @State private var isSizeIncreased: Bool = false
     @State private var isConversionCompleted: Bool = false
     @State private var lastDestinationFolder: URL? = nil
+    @State private var lastDurationText: String = ""
     
     @Environment(\.colorScheme) private var colorScheme
     
@@ -514,7 +515,9 @@ struct ContentView: View {
             
             // Text Summary Stack
             VStack(alignment: .leading, spacing: 1) {
-                Text(lastConvertedCount == 1 ? "1 file converted" : "\(lastConvertedCount) files converted")
+                let fileCountText = lastConvertedCount == 1 ? "1 file converted" : "\(lastConvertedCount) files converted"
+                let headlineText = lastDurationText.isEmpty ? fileCountText : "\(fileCountText) in \(lastDurationText)"
+                Text(headlineText)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(.primary)
                 
@@ -988,6 +991,8 @@ struct ContentView: View {
         let targetPreserveTransparency = preserveTransparency
         
         Task {
+            let startTime = CFAbsoluteTimeGetCurrent()
+            
             await MainActor.run {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isConverting = true
@@ -1034,6 +1039,9 @@ struct ContentView: View {
                 }
             }
             
+            let elapsedTime = CFAbsoluteTimeGetCurrent() - startTime
+            let durationString = formatDuration(elapsedTime)
+            
             let isIncreased = totalOut > totalOrig
             let diffBytes = abs(totalOrig - totalOut)
             let percentage = totalOrig > 0 ? Int(round((Double(diffBytes) / Double(totalOrig)) * 100.0)) : 0
@@ -1051,6 +1059,7 @@ struct ContentView: View {
                     lastSavedPercentage = percentage
                     isSizeIncreased = isIncreased
                     lastDestinationFolder = destinationFolder
+                    lastDurationText = durationString
                     showSummaryToast = true
                     isConversionCompleted = true
                 }
@@ -1058,6 +1067,22 @@ struct ContentView: View {
                     NSSound(named: "Glass")?.play()
                 }
             }
+        }
+    }
+    
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        if duration < 0.1 {
+            return "< 0.1s"
+        } else if duration < 59.95 {
+            return String(format: "%.1fs", duration)
+        } else if duration < 3600 {
+            let minutes = Int(duration) / 60
+            let seconds = Int(duration) % 60
+            return "\(minutes)m \(seconds)s"
+        } else {
+            let hours = Int(duration) / 3600
+            let minutes = (Int(duration) % 3600) / 60
+            return "\(hours)h \(minutes)m"
         }
     }
     
