@@ -24,7 +24,8 @@ struct ContentView: View {
     @State private var isShowingFileImporter: Bool = false
     @State private var isShowingAboutSheet: Bool = false
     @State private var viewMode: ViewMode = .grid
-    @State private var quality: Double = 0.80
+    @State private var quality: Double = UserDefaults.standard.object(forKey: "defaultQuality") as? Double ?? 0.80
+    @AppStorage("defaultQuality") private var defaultQuality: Double = 0.80
     @AppStorage("selectedOutputFormat") private var selectedOutputFormatRaw: String = OutputFormat.jpeg.rawValue
     private var selectedOutputFormat: OutputFormat {
         get { OutputFormat(rawValue: selectedOutputFormatRaw) ?? .jpeg }
@@ -346,11 +347,22 @@ struct ContentView: View {
                 addFiles(urls: urls)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openMainWindow)) { _ in
+            MainWindowManager.shared.showMainWindow()
+        }
         .background(WindowAccessor { window in
             MainWindowManager.shared.register(window: window)
         })
         .onAppear {
+            if photos.isEmpty {
+                quality = defaultQuality
+            }
             setupKeyboardMonitor()
+        }
+        .onChange(of: defaultQuality) { _, newDefault in
+            if photos.isEmpty {
+                quality = newDefault
+            }
         }
         .onDisappear {
             removeKeyboardMonitor()
@@ -406,6 +418,7 @@ struct ContentView: View {
                             showSummaryToast = false
                             isConversionCompleted = false
                             errorMessage = nil
+                            quality = defaultQuality
                         }
                     }) {
                         Text("Clear")
@@ -1508,7 +1521,6 @@ struct MinimalHeroVisual: View {
     
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHovered: Bool = false
-    @State private var isAnimating: Bool = false
 
     var body: some View {
         ZStack {
@@ -1527,7 +1539,7 @@ struct MinimalHeroVisual: View {
                     )
                 )
                 .frame(width: 220, height: 220)
-                .scaleEffect(isTargeted ? 1.3 : (isAnimating ? 1.05 : 0.95))
+                .scaleEffect(isTargeted ? 1.25 : 1.0)
                 .blur(radius: 18)
 
             // Minimal Glass Drop Zone Circle
@@ -1546,7 +1558,7 @@ struct MinimalHeroVisual: View {
                         lineWidth: isTargeted ? 2.5 : 1.5
                     )
                     .frame(width: 140, height: 140)
-                    .scaleEffect(isTargeted ? 1.1 : (isHovered ? 1.04 : 1.0))
+                    .scaleEffect(isTargeted ? 1.08 : (isHovered ? 1.04 : 1.0))
 
                 // Inner soft filled disc
                 Circle()
@@ -1583,11 +1595,7 @@ struct MinimalHeroVisual: View {
             }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.75), value: isTargeted)
-        .animation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true), value: isAnimating)
         .frame(height: 180)
-        .onAppear {
-            isAnimating = true
-        }
     }
 }
 

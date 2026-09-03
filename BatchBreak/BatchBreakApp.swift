@@ -14,19 +14,28 @@ extension Notification.Name {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Setup menu bar icon and drag-and-drop popup
-        MenuBarManager.shared.setup()
+        // Apply initial user settings (Dock, Menu Bar, Appearance, Launch at Login)
+        AppSettings.shared.applyInitialSettings()
+        
+        // Show splash screen on first launch
+        if !AppSettings.shared.hasCompletedOnboarding {
+            SplashWindowManager.shared.showSplashWindow()
+        }
     }
     
-    // Keep app running in menu bar even after main window is closed
+    // Keep app running even after main window is closed, unless user enabled quitAppOnClose
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return false
+        return AppSettings.shared.quitAppOnClose
     }
     
-    // When dock icon is clicked, reopen main window if hidden
+    // When dock icon is clicked, reopen main window (or splash screen if not yet completed)
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
-            MainWindowManager.shared.showMainWindow()
+            if !AppSettings.shared.hasCompletedOnboarding {
+                SplashWindowManager.shared.showSplashWindow()
+            } else {
+                MainWindowManager.shared.showMainWindow()
+            }
             return false // Prevent system from creating a duplicate window
         }
         return true
@@ -40,10 +49,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct BatchBreakApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @ObservedObject private var settings = AppSettings.shared
     
     var body: some Scene {
         Window("BatchBreak", id: "main") {
             ContentView()
+                .preferredColorScheme(settings.resolvedColorScheme)
         }
         .windowStyle(.hiddenTitleBar)
         .windowBackgroundDragBehavior(.enabled)
@@ -54,6 +65,15 @@ struct BatchBreakApp: App {
                 Button("About BatchBreak") {
                     NotificationCenter.default.post(name: .showAboutSheet, object: nil)
                 }
+                Button("Welcome to BatchBreak") {
+                    SplashWindowManager.shared.showSplashWindow()
+                }
+            }
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    SettingsWindowManager.shared.showSettingsWindow()
+                }
+                .keyboardShortcut(",", modifiers: .command)
             }
         }
     }
