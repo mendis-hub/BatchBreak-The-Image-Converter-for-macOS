@@ -25,7 +25,11 @@ struct ContentView: View {
     @State private var isShowingAboutSheet: Bool = false
     @State private var viewMode: ViewMode = .grid
     @State private var quality: Double = 0.80
-    @State private var selectedOutputFormat: OutputFormat = .jpeg
+    @AppStorage("selectedOutputFormat") private var selectedOutputFormatRaw: String = OutputFormat.jpeg.rawValue
+    private var selectedOutputFormat: OutputFormat {
+        get { OutputFormat(rawValue: selectedOutputFormatRaw) ?? .jpeg }
+        nonmutating set { selectedOutputFormatRaw = newValue.rawValue }
+    }
     @State private var preserveTransparency: Bool = true
     @State private var quickLookURL: URL? = nil
     
@@ -337,6 +341,14 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .showAboutSheet)) { _ in
             isShowingAboutSheet = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openWithDroppedFiles)) { notification in
+            if let urls = notification.object as? [URL], !urls.isEmpty {
+                addFiles(urls: urls)
+            }
+        }
+        .background(WindowAccessor { window in
+            MainWindowManager.shared.register(window: window)
+        })
         .onAppear {
             setupKeyboardMonitor()
         }
