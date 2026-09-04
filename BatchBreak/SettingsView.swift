@@ -10,6 +10,7 @@ import AppKit
 
 struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
+    @Environment(\.openWindow) private var openWindow
     
     var body: some View {
         VStack(spacing: 0) {
@@ -215,6 +216,9 @@ struct SettingsView: View {
         .preferredColorScheme(settings.resolvedColorScheme)
         .onAppear {
             settings.refreshLaunchAtLoginStatus()
+            MainWindowManager.shared.openWindowHandler = { [openWindow] in
+                openWindow(id: "main")
+            }
         }
     }
 }

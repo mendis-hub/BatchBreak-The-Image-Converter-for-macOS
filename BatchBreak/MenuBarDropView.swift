@@ -33,6 +33,8 @@ struct MenuBarDropView: View {
     var onOpenSettings: (() -> Void)? = nil
     var onDismiss: (() -> Void)? = nil
     
+    @Environment(\.openWindow) private var openWindow
+    
     @AppStorage("selectedOutputFormat") private var selectedOutputFormatRaw: String = OutputFormat.jpeg.rawValue
     
     @State private var isOpenWindowHovered: Bool = false
@@ -215,7 +217,10 @@ struct MenuBarDropView: View {
             
             // Bottom Action Bar
             HStack {
-                Button(action: onOpenApp) {
+                Button(action: {
+                    openWindow(id: "main")
+                    onOpenApp()
+                }) {
                     Text("Open Window")
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.white)
@@ -254,6 +259,11 @@ struct MenuBarDropView: View {
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 12)
+        }
+        .onAppear {
+            MainWindowManager.shared.openWindowHandler = { [openWindow] in
+                openWindow(id: "main")
+            }
         }
     }
     

@@ -30,15 +30,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // When dock icon is clicked, reopen main window (or splash screen if not yet completed)
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
-            if !AppSettings.shared.hasCompletedOnboarding {
-                SplashWindowManager.shared.showSplashWindow()
-            } else {
-                MainWindowManager.shared.showMainWindow()
-            }
-            return false // Prevent system from creating a duplicate window
+        if !AppSettings.shared.hasCompletedOnboarding {
+            SplashWindowManager.shared.showSplashWindow()
+            return false
         }
-        return true
+        
+        MainWindowManager.shared.showMainWindow()
+        return false // Prevent system from focusing secondary windows (like Settings) or duplicating
     }
     
     func applicationWillTerminate(_ notification: Notification) {

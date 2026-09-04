@@ -14,6 +14,8 @@ final class SettingsWindowManager: NSObject, NSWindowDelegate {
     
     private var window: NSWindow?
     
+    var currentWindow: NSWindow? { window }
+    
     private override init() {
         super.init()
     }
@@ -58,6 +60,7 @@ final class SettingsWindowManager: NSObject, NSWindowDelegate {
         let hostingController = NSHostingController(rootView: settingsView)
         
         let newWindow = NSWindow(contentViewController: hostingController)
+        newWindow.identifier = NSUserInterfaceItemIdentifier("BatchBreakSettingsWindow")
         newWindow.title = "Settings"
         newWindow.styleMask = [.titled, .closable, .miniaturizable]
         newWindow.isReleasedWhenClosed = false
@@ -74,7 +77,7 @@ final class SettingsWindowManager: NSObject, NSWindowDelegate {
         var mainWindow = MainWindowManager.shared.mainWindow
         if mainWindow == nil || !(mainWindow?.isVisible ?? false) {
             mainWindow = NSApp.windows.first(where: {
-                $0.isVisible && !($0 is NSPanel) && $0.className != "NSStatusBarWindow" && $0.canBecomeKey && $0 !== settingsWindow
+                $0.isVisible && MainWindowManager.shared.isMainWindowCandidate($0) && $0 !== settingsWindow
             })
         }
         

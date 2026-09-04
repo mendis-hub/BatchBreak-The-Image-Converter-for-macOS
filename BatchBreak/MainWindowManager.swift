@@ -19,20 +19,43 @@ final class MainWindowManager: NSObject, NSWindowDelegate {
     // Hold a strong reference so the window isn't deallocated when ordered out before onboarding completes
     private(set) var mainWindow: NSWindow?
     
+    // Handler to invoke SwiftUI openWindow for the main window when needed
+    var openWindowHandler: (() -> Void)?
+    
+    func isMainWindowCandidate(_ window: NSWindow) -> Bool {
+        // Exclude utility panels, status bar, and windows that cannot become key
+        if window is NSPanel || window.className == "NSStatusBarWindow" || !window.canBecomeKey {
+            return false
+        }
+        
+        // Exclude splash window
+        if window.identifier?.rawValue == "BatchBreakSplashWindow" || window.className.contains("Splash") || window.title.contains("Welcome") {
+            return false
+        }
+        
+        // Exclude settings window
+        if window.identifier?.rawValue == "BatchBreakSettingsWindow" || window.title == "Settings" || window.className.contains("Settings") {
+            return false
+        }
+        if let settingsWindow = SettingsWindowManager.shared.currentWindow, window === settingsWindow {
+            return false
+        }
+        
+        return true
+    }
+    
     private override init() {
         super.init()
     }
     
     func register(window: NSWindow) {
-        // Never register the splash window as the main window
-        if window.identifier?.rawValue == "BatchBreakSplashWindow" {
-            return
-        }
+        // Never register splash or settings windows as the main window
+        guard isMainWindowCandidate(window) else { return }
         
         guard self.mainWindow !== window else { return }
         
-        // If an existing main window is already registered, close any newcomer to prevent duplicates
-        if let existing = self.mainWindow, existing !== window {
+        // If an existing main window is already registered and still valid, close any newcomer to prevent duplicates
+        if let existing = self.mainWindow, existing !== window, isMainWindowCandidate(existing) {
             window.orderOut(nil)
             window.close()
             return
@@ -109,10 +132,10 @@ final class MainWindowManager: NSObject, NSWindowDelegate {
             }
         }
         
-        if let window = mainWindow {
-            // Dismiss any accidental duplicate windows
+        if let window = mainWindow, isMainWindowCandidate(window) {
+            // Dismiss any accidental duplicate main windows (leaving settings and splash windows untouched)
             for otherWindow in NSApp.windows {
-                if otherWindow !== window && otherWindow.identifier?.rawValue != "BatchBreakSplashWindow" && !(otherWindow is NSPanel) && otherWindow.className != "NSStatusBarWindow" && otherWindow.canBecomeKey {
+                if otherWindow !== window && isMainWindowCandidate(otherWindow) {
                     otherWindow.orderOut(nil)
                     otherWindow.close()
                 }
@@ -121,27 +144,32 @@ final class MainWindowManager: NSObject, NSWindowDelegate {
             return
         }
         
+        // Reset invalid reference if any
+        self.mainWindow = nil
+        
         // Fallback: locate main application window if reference wasn't captured yet
         var foundMain: NSWindow?
         for window in NSApp.windows {
-            if window.identifier?.rawValue == "BatchBreakSplashWindow" || window.className.contains("Splash") {
+            guard isMainWindowCandidate(window) else {
                 continue
             }
-            if !(window is NSPanel) && window.className != "NSStatusBarWindow" && window.canBecomeKey {
-                if foundMain == nil {
-                    foundMain = window
-                    register(window: window)
-                } else {
-                    // Duplicate found, close it
-                    window.orderOut(nil)
-                    window.close()
-                }
+            if foundMain == nil {
+                foundMain = window
+                register(window: window)
+            } else {
+                // Duplicate main window found, close it
+                window.orderOut(nil)
+                window.close()
             }
         }
         
         if let window = foundMain {
             activateWindow(window)
         } else {
+            // Request SwiftUI to open the main window if available
+            if let openHandler = openWindowHandler {
+                openHandler()
+            }
             // Broadcast notification in case SwiftUI can handle reopening
             NotificationCenter.default.post(name: .openMainWindow, object: nil)
         }
