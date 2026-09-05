@@ -128,9 +128,3 @@ The Code: This is a source-available project, not open-source. The source code i
 
 If you would like to use snippets of this code or contribute, please contact me at k.madusanka1@gmail.com.
 See [LICENSE](LICENSE) for details.
-
----
-
-<div align="center">
-Made with ❤️ for macOS · Built with SwiftUI
-</div>
