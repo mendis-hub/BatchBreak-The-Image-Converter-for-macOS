@@ -40,6 +40,8 @@ final class MenuBarManager: NSObject {
         // Create status bar item with variable width
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
+            button.appearance = nil
+            button.window?.appearance = nil
             button.image = createStatusItemIcon()
             button.imagePosition = .imageOnly
             button.toolTip = "BatchBreak - Drag and drop your files here to convert"
@@ -81,6 +83,13 @@ final class MenuBarManager: NSObject {
         
         setupDropPanel()
         startDragMonitoring()
+    }
+    
+    func ensureSystemAppearance() {
+        if let button = statusItem?.button {
+            button.appearance = nil
+            button.window?.appearance = nil
+        }
     }
     
     func teardown() {
@@ -172,6 +181,10 @@ final class MenuBarManager: NSObject {
                 self?.hideDropPanel()
                 MainWindowManager.shared.showMainWindow()
             },
+            onOpenSettings: { [weak self] in
+                self?.hideDropPanel()
+                SettingsWindowManager.shared.showSettingsWindow()
+            },
             onDismiss: { [weak self] in
                 self?.hideDropPanel()
             }
@@ -196,7 +209,7 @@ final class MenuBarManager: NSObject {
     
     func showDropPanel() {
         guard let panel = dropPanel else { return }
-        // Reset state only when reopening so user always sees the clean drop area
+        // Reset state only when reopening so user always sees the clean drop area\
         dropViewState.reset()
         
         if let button = statusItem?.button {
@@ -328,6 +341,10 @@ final class MenuBarManager: NSObject {
         
         menu.addItem(NSMenuItem.separator())
         
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettingsFromMenu), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+        
         let aboutItem = NSMenuItem(title: "About BatchBreak", action: #selector(openAboutFromMenu), keyEquivalent: "")
         aboutItem.target = self
         menu.addItem(aboutItem)
@@ -347,6 +364,10 @@ final class MenuBarManager: NSObject {
         MainWindowManager.shared.showMainWindow()
     }
     
+    @objc private func openSettingsFromMenu() {
+        SettingsWindowManager.shared.showSettingsWindow()
+    }
+    
     @objc private func openAboutFromMenu() {
         MainWindowManager.shared.showMainWindow()
         NotificationCenter.default.post(name: .showAboutSheet, object: nil)
@@ -360,7 +381,7 @@ final class MenuBarManager: NSObject {
     private func positionPanelUnderStatusItem(_ panel: NSPanel, relativeTo button: NSStatusBarButton) {
         let panelWidth = MenuBarDropView.cardWidth
         let panelHeight = MenuBarDropView.cardHeight
-        let gapFromStatusBar: CGFloat = 6
+        let gapFromStatusBar: CGFloat = 8
         
         var x: CGFloat = 0
         var y: CGFloat = 0
@@ -385,7 +406,7 @@ final class MenuBarManager: NSObject {
         } else if let screen = NSScreen.main ?? NSScreen.screens.first {
             let screenFrame = screen.visibleFrame
             x = screenFrame.maxX - panelWidth - 20
-            y = screenFrame.maxY - panelHeight - 10
+            y = screenFrame.maxY - panelHeight - 12
         }
         
         panel.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)

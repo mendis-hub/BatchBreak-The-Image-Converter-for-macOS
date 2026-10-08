@@ -1768,7 +1768,7 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
     }
     
     nonisolated func loadThumbnailAsync(targetSize: CGSize = CGSize(width: 320, height: 320), completion: @escaping @Sendable (NSImage?) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue.global(qos: .utility).async {
             let img = self.withSecurityScopedAccess { () -> NSImage? in
                 let extLower = self.fileExtension.lowercased()
                 if extLower == "svg" {
@@ -1851,7 +1851,8 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
                     let options: [CFString: Any] = [
                         kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
                         kCGImageSourceCreateThumbnailWithTransform: true,
-                        kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+                        kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+                        kCGImageSourceShouldCacheImmediately: true
                     ]
                     if let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) {
                         return NSImage(cgImage: cgImage, size: targetSize)

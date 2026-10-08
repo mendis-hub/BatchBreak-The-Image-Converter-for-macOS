@@ -24,7 +24,8 @@ struct ContentView: View {
     @State private var isShowingFileImporter: Bool = false
     @State private var isShowingAboutSheet: Bool = false
     @State private var viewMode: ViewMode = .grid
-    @State private var quality: Double = 0.80
+    @State private var quality: Double = UserDefaults.standard.object(forKey: "defaultQuality") as? Double ?? 0.80
+    @AppStorage("defaultQuality") private var defaultQuality: Double = 0.80
     @AppStorage("selectedOutputFormat") private var selectedOutputFormatRaw: String = OutputFormat.jpeg.rawValue
     private var selectedOutputFormat: OutputFormat {
         get { OutputFormat(rawValue: selectedOutputFormatRaw) ?? .jpeg }
@@ -278,9 +279,6 @@ struct ContentView: View {
                         selectedPhotoIDs.removeAll()
                     }
                     
-                    // Top Header Bar with Liquid Glass Background Material
-                    topHeaderBar
-                    
                     // MARK: - Bottom Floating Overlay (Summary Toast / Progress Bar / Photo Count Badge)
                     Group {
                         if isConverting {
@@ -302,6 +300,9 @@ struct ContentView: View {
                         .frame(maxHeight: .infinity, alignment: .bottom)
                 }
             }
+            
+            // MARK: - Toolbar Liquid Glass Background
+            toolbarGlassBackground
             
             // MARK: - Floating Error Message Toast
             if let errorMsg = errorMessage {
@@ -349,136 +350,96 @@ struct ContentView: View {
         .background(WindowAccessor { window in
             MainWindowManager.shared.register(window: window)
         })
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("View Mode", selection: $viewMode) {
+                    Image(systemName: "square.grid.2x2")
+                        .tag(ViewMode.grid)
+                        .accessibilityLabel("Thumbnail")
+                    Image(systemName: "list.bullet")
+                        .tag(ViewMode.list)
+                        .accessibilityLabel("List")
+                }
+                .pickerStyle(.segmented)
+                .controlSize(.extraLarge)
+                .help("View Mode")
+            }
+            
+            ToolbarItem(placement: .primaryAction) {
+                ControlGroup {
+                    Button(role: .destructive, action: deleteSelectedPhotos) {
+                        Image(systemName: "trash")
+                            .foregroundStyle(selectedPhotoIDs.isEmpty || isConverting ? Color.secondary : Color.red)
+                    }
+                    .tint(selectedPhotoIDs.isEmpty || isConverting ? nil : Color.red)
+                    .disabled(selectedPhotoIDs.isEmpty || isConverting)
+                    .help("Delete Selected")
+                    
+                    Button(action: {
+                        isShowingFileImporter = true
+                    }) {
+                        Text("Add Files...")
+                            .padding(.horizontal, 6)
+                    }
+                    .disabled(isConverting)
+                    .help("Add Files")
+                    
+                    Button(action: clearPhotos) {
+                        Text("Clear")
+                            .padding(.horizontal, 14)
+                    }
+                    .disabled(photos.isEmpty || isConverting)
+                    .help("Clear All")
+                }
+                .controlSize(.extraLarge)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openMainWindow)) { _ in
+            MainWindowManager.shared.showMainWindow()
+        }
         .onAppear {
+            if photos.isEmpty {
+                quality = defaultQuality
+            }
             setupKeyboardMonitor()
+        }
+        .onChange(of: defaultQuality) { _, newDefault in
+            if photos.isEmpty {
+                quality = newDefault
+            }
         }
         .onDisappear {
             removeKeyboardMonitor()
         }
     }
     
-    // MARK: - Top Header Bar
-    private var topHeaderBar: some View {
-        ZStack {
-            // Right Action Buttons
-            HStack(alignment: .center) {
-                Spacer()
-                
-                // Trash (Delete Selected), Add Files & Clear Buttons
-                HStack(spacing: 10) {
-                    // Circle-Shaped Delete Selected Trash Button (Left of Add Files)
-                    Button(action: deleteSelectedPhotos) {
-                        Image(systemName: "trash")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(selectedPhotoIDs.isEmpty || isConverting ? Color.secondary.opacity(0.4) : Color.red)
-                            .padding(6)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .disabled(selectedPhotoIDs.isEmpty || isConverting)
-                    .onHover { inside in
-                        if inside && !selectedPhotoIDs.isEmpty && !isConverting {
-                            NSCursor.pointingHand.push()
-                        } else {
-                            NSCursor.pop()
-                        }
-                    }
-                    
-                    Button(action: {
-                        isShowingFileImporter = true
-                    }) {
-                        Text("Add Files...")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.capsule)
-                    .disabled(isConverting)
-                    .onHover { inside in
-                        if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-                    }
-                    
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            photos.removeAll()
-                            selectedPhotoIDs.removeAll()
-                            showSummaryToast = false
-                            isConversionCompleted = false
-                            errorMessage = nil
-                        }
-                    }) {
-                        Text("Clear")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.capsule)
-                    .disabled(isConverting)
-                    .onHover { inside in
-                        if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-                    }
-                }
-            }
-            
-            // Perfectly Centered View Mode Switcher [ Grid | List ]
-            HStack(spacing: 2) {
-                Button(action: {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        viewMode = .grid
-                    }
-                }) {
-                    Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(viewMode == .grid ? Color.primary : Color.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            viewMode == .grid ? Color.primary.opacity(0.12) : Color.clear
-                        )
-                        .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
-                
-                Divider()
-                    .frame(height: 12)
-                
-                Button(action: {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        viewMode = .list
-                    }
-                }) {
-                    Image(systemName: "list.bullet")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(viewMode == .list ? Color.primary : Color.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            viewMode == .list ? Color.primary.opacity(0.12) : Color.clear
-                        )
-                        .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(3)
-            .background(Color.primary.opacity(0.06))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    // MARK: - Toolbar Liquid Glass Background
+    private var toolbarGlassBackground: some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(height: 52)
+            .glassEffect(.regular, in: Rectangle())
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                Rectangle()
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(height: 1),
+                alignment: .bottom
             )
+            .frame(maxHeight: .infinity, alignment: .top)
+            .ignoresSafeArea(.all, edges: .top)
+            .allowsHitTesting(false)
+    }
+    
+    // MARK: - Actions
+    private func clearPhotos() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            photos.removeAll()
+            selectedPhotoIDs.removeAll()
+            showSummaryToast = false
+            isConversionCompleted = false
+            errorMessage = nil
+            quality = defaultQuality
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-        .glassEffect(.regular, in: Rectangle())
-        .overlay(
-            Rectangle()
-                .fill(Color.primary.opacity(0.08))
-                .frame(height: 1),
-            alignment: .bottom
-        )
     }
     
     // MARK: - Floating Error Message Toast

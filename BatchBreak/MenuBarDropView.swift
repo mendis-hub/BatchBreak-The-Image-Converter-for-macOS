@@ -30,9 +30,16 @@ struct MenuBarDropView: View {
     @ObservedObject var state: MenuBarDropViewState
     let onDropURLs: ([URL]) -> Void
     let onOpenApp: () -> Void
-    let onDismiss: () -> Void
+    var onOpenSettings: (() -> Void)? = nil
+    var onDismiss: (() -> Void)? = nil
+    
+    @Environment(\.openWindow) private var openWindow
     
     @AppStorage("selectedOutputFormat") private var selectedOutputFormatRaw: String = OutputFormat.jpeg.rawValue
+    
+    @State private var isOpenWindowHovered: Bool = false
+    @State private var isQuitHovered: Bool = false
+    @State private var isSettingsHovered: Bool = false
     
     private var selectedFormat: OutputFormat {
         get { OutputFormat(rawValue: selectedOutputFormatRaw) ?? .jpeg }
@@ -109,27 +116,20 @@ struct MenuBarDropView: View {
                 
                 Spacer()
                 
-                Button(action: onOpenApp) {
-                    Image(systemName: "arrow.up.forward.app")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(4)
+                Button(action: {
+                    onOpenSettings?()
+                }) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(isSettingsHovered ? Color.primary : Color.secondary)
+                        .padding(5)
+                        .background(isSettingsHovered ? Color.primary.opacity(0.08) : Color.clear)
+                        .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .help("Open BatchBreak")
+                .help("Settings…")
                 .onHover { inside in
-                    if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-                }
-                
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .padding(4)
-                }
-                .buttonStyle(.plain)
-                .help("Close")
-                .onHover { inside in
+                    isSettingsHovered = inside
                     if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                 }
             }
@@ -217,15 +217,24 @@ struct MenuBarDropView: View {
             
             // Bottom Action Bar
             HStack {
-                Button(action: onOpenApp) {
+                Button(action: {
+                    openWindow(id: "main")
+                    onOpenApp()
+                }) {
                     Text("Open Window")
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.white)
                         .padding(.horizontal, 12)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 5)
+                        .background(
+                            Color.accentColor
+                                .opacity(isOpenWindowHovered ? 0.9 : 1.0)
+                        )
+                        .clipShape(Capsule())
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.capsule)
+                .buttonStyle(.plain)
                 .onHover { inside in
+                    isOpenWindowHovered = inside
                     if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                 }
                 
@@ -236,17 +245,25 @@ struct MenuBarDropView: View {
                 }) {
                     Text("Quit")
                         .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(isQuitHovered ? Color.primary : Color.secondary)
                         .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 5)
+                        .background(isQuitHovered ? Color.primary.opacity(0.06) : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .onHover { inside in
+                    isQuitHovered = inside
                     if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                 }
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 12)
+        }
+        .onAppear {
+            MainWindowManager.shared.openWindowHandler = { [openWindow] in
+                openWindow(id: "main")
+            }
         }
     }
     
