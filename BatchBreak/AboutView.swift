@@ -10,6 +10,7 @@ import AppKit
 
 struct AboutView: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var updater = AppUpdaterManager.shared
     
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.1"
@@ -68,21 +69,40 @@ struct AboutView: View {
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             )
             
-            // GitHub Repository Button
-            Button(action: openGitHubRepo) {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.up.right.square")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("GitHub Repository")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+            // Action Buttons (GitHub Repository & Check for Updates)
+            HStack(spacing: 10) {
+                Button(action: openGitHubRepo) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("GitHub")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.capsule)
-            .onHover { inside in
-                if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.capsule)
+                .onHover { inside in
+                    if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+                
+                Button(action: { updater.checkForUpdates() }) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Updates")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.capsule)
+                .disabled(!updater.canCheckForUpdates)
+                .onHover { inside in
+                    if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
             }
             
             // Close Button

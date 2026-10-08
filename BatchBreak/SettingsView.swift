@@ -10,6 +10,7 @@ import AppKit
 
 struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var updater = AppUpdaterManager.shared
     @Environment(\.openWindow) private var openWindow
     
     var body: some View {
@@ -207,11 +208,64 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    
+                    // MARK: - 7: Software Updates Section
+                    SettingsSection(title: "Updates", icon: "arrow.triangle.2.circlepath") {
+                        SettingsRow(
+                            title: "Check for Updates Automatically",
+                            subtitle: "Automatically check for new versions on startup and in the background",
+                            icon: "sparkles",
+                            iconColor: .purple
+                        ) {
+                            Toggle("", isOn: Binding(
+                                get: { updater.automaticallyChecksForUpdates },
+                                set: { updater.automaticallyChecksForUpdates = $0 }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                        }
+                        
+                        Divider()
+                            .padding(.leading, 40)
+                        
+                        SettingsRow(
+                            title: "Download Updates Automatically",
+                            subtitle: "Download updates in the background when a new version is found",
+                            icon: "arrow.down.circle.fill",
+                            iconColor: .blue
+                        ) {
+                            Toggle("", isOn: Binding(
+                                get: { updater.automaticallyDownloadsUpdates },
+                                set: { updater.automaticallyDownloadsUpdates = $0 }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .disabled(!updater.automaticallyChecksForUpdates)
+                        }
+                        
+                        Divider()
+                            .padding(.leading, 40)
+                        
+                        SettingsRow(
+                            title: "Check for Updates",
+                            subtitle: "Manually check for available updates right now",
+                            icon: "arrow.clockwise",
+                            iconColor: .green
+                        ) {
+                            Button("Check Now") {
+                                updater.checkForUpdates()
+                            }
+                            .buttonStyle(.glass)
+                            .buttonBorderShape(.capsule)
+                            .controlSize(.small)
+                            .disabled(!updater.canCheckForUpdates)
+                        }
+                    }
                 }
                 .padding(22)
             }
         }
-        .frame(width: 480, height: 570)
+        .frame(width: 480, height: 600)
         .background(Color(NSColor.windowBackgroundColor))
         .preferredColorScheme(settings.resolvedColorScheme)
         .onAppear {

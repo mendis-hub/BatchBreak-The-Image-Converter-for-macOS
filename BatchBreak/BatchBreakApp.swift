@@ -7,9 +7,39 @@
 
 import SwiftUI
 import AppKit
+import Combine
+import Sparkle
 
 extension Notification.Name {
     static let showAboutSheet = Notification.Name("showAboutSheet")
+}
+
+// MARK: - Sparkle Update View Model & View
+
+final class CheckForUpdatesViewModel: ObservableObject {
+    @Published var canCheckForUpdates = false
+    
+    init(updater: SPUUpdater) {
+        updater.publisher(for: \.canCheckForUpdates)
+            .assign(to: &$canCheckForUpdates)
+    }
+}
+
+struct CheckForUpdatesView: View {
+    @ObservedObject private var checkForUpdatesViewModel: CheckForUpdatesViewModel
+    private let updater: SPUUpdater
+    
+    init(updater: SPUUpdater) {
+        self.updater = updater
+        self.checkForUpdatesViewModel = CheckForUpdatesViewModel(updater: updater)
+    }
+    
+    var body: some View {
+        Button("Check for Updates…") {
+            updater.checkForUpdates()
+        }
+        .disabled(!checkForUpdatesViewModel.canCheckForUpdates)
+    }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -49,6 +79,18 @@ struct BatchBreakApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @ObservedObject private var settings = AppSettings.shared
     
+    private let updaterController: SPUStandardUpdaterController
+    
+    init() {
+        let controller = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
+        self.updaterController = controller
+        AppUpdaterManager.shared.configure(with: controller)
+    }
+    
     var body: some Scene {
         Window("BatchBreak", id: "main") {
             ContentView()
@@ -66,6 +108,9 @@ struct BatchBreakApp: App {
                 Button("Welcome to BatchBreak") {
                     SplashWindowManager.shared.showSplashWindow()
                 }
+            }
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesView(updater: updaterController.updater)
             }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
