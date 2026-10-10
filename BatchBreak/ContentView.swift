@@ -1275,6 +1275,19 @@ struct ContentView: View {
             finalImage = cgImage
         }
         
+        // WebP has no ImageIO writer on macOS; encode via dedicated WebP encoder with full alpha transparency support
+        if format == .webp {
+            if let data = WebPEncoder.encode(cgImage: finalImage, quality: quality, preserveTransparency: preserveTransparency) {
+                do {
+                    try data.write(to: destURL)
+                    return Int64(data.count)
+                } catch {
+                    print("BatchBreak Error writing WebP data to \(destURL.path): \(error)")
+                }
+            }
+            return 0
+        }
+        
         let uti = format.utiIdentifier
         let outputData = NSMutableData()
         if let destinationData = CGImageDestinationCreateWithData(outputData as CFMutableData, uti, 1, nil) {
@@ -1298,8 +1311,10 @@ struct ContentView: View {
         let rep = NSBitmapImageRep(cgImage: finalImage)
         let fileData: Data?
         switch format {
-        case .jpeg, .heic, .webp:
+        case .jpeg, .heic:
             fileData = rep.representation(using: .jpeg, properties: [.compressionFactor: quality])
+        case .webp:
+            fileData = WebPEncoder.encode(cgImage: finalImage, quality: quality, preserveTransparency: preserveTransparency)
         case .png:
             fileData = rep.representation(using: .png, properties: [:])
         case .tiff:
