@@ -104,6 +104,9 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         case .webp:
             let bpp = 0.02 + 0.26 * pow(quality, 1.7)
             estimatedBytes = pixels * bpp
+        case .avif:
+            let bpp = 0.012 + 0.18 * pow(quality, 1.7)
+            estimatedBytes = pixels * bpp
         case .tiff:
             let bpp = 1.5 + 2.0 * quality
             estimatedBytes = pixels * bpp
@@ -1714,7 +1717,7 @@ struct PhotoItem: Identifiable, Hashable, Sendable {
         }
         
         let validExtensions: Set<String> = [
-            "jpg", "jpeg", "jpe", "png", "heic", "heif", "webp", "tiff", "tif", "bmp", "gif",
+            "jpg", "jpeg", "jpe", "png", "heic", "heif", "webp", "avif", "avis", "tiff", "tif", "bmp", "gif",
             "pdf", "psd", "dng", "raw", "cr2", "cr3", "raf", "nrw", "nef", "srf", "sr2", "arw", "orf",
             "jp2", "j2k", "jpx", "jpf", "wbmp", "mng", "pam", "ras", "sun", "sr", "rw4", "rw2", "rwl",
             "ppm", "pnm", "pgm", "pbm", "pict", "pct", "pic", "sgi", "rgb", "rgba", "bw", "int", "inta",
@@ -1905,6 +1908,7 @@ enum OutputFormat: String, CaseIterable, Identifiable, Sendable {
     case png = "PNG"
     case heic = "HEIC"
     case webp = "WEBP"
+    case avif = "AVIF"
     case tiff = "TIFF"
     case pdf = "PDF"
     
@@ -1914,7 +1918,7 @@ enum OutputFormat: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .jpeg:
             return false
-        case .png, .heic, .webp, .tiff, .pdf:
+        case .png, .heic, .webp, .avif, .tiff, .pdf:
             return true
         }
     }
@@ -1925,6 +1929,7 @@ enum OutputFormat: String, CaseIterable, Identifiable, Sendable {
         case .png: return "png"
         case .heic: return "heic"
         case .webp: return "webp"
+        case .avif: return "avif"
         case .tiff: return "tiff"
         case .pdf: return "pdf"
         }
@@ -1940,6 +1945,11 @@ enum OutputFormat: String, CaseIterable, Identifiable, Sendable {
                 return webpType.identifier as CFString
             }
             return "org.webmproject.webp" as CFString
+        case .avif:
+            if let avifType = UTType("public.avif") ?? UTType(filenameExtension: "avif") {
+                return avifType.identifier as CFString
+            }
+            return "public.avif" as CFString
         case .tiff: return UTType.tiff.identifier as CFString
         case .pdf: return UTType.pdf.identifier as CFString
         }

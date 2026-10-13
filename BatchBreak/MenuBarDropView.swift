@@ -177,7 +177,7 @@ struct MenuBarDropView: View {
                             .foregroundStyle(state.isTargeted ? Color.accentColor : Color.primary)
                         
                         // Output Formats Badges
-                        HStack(spacing: 4) {
+                        HStack(spacing: 3) {
                             ForEach(OutputFormat.allCases) { format in
                                 Button {
                                     withAnimation(.easeInOut(duration: 0.15)) {
@@ -186,7 +186,7 @@ struct MenuBarDropView: View {
                                 } label: {
                                     Text(format.rawValue)
                                         .font(.system(size: 9, weight: .bold, design: .rounded))
-                                        .padding(.horizontal, 5)
+                                        .padding(.horizontal, 4)
                                         .padding(.vertical, 2.5)
                                         .background(
                                             selectedFormat == format

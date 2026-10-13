@@ -1301,6 +1301,9 @@ struct ContentView: View {
             var options: [CFString: Any] = [:]
             if format == .jpeg || format == .heic {
                 options[kCGImageDestinationLossyCompressionQuality] = quality
+            } else if format == .avif {
+                // macOS ImageIO AVIF encoder requires quality < 1.0 (clamped to 0.999 for maximum quality)
+                options[kCGImageDestinationLossyCompressionQuality] = min(quality, 0.999)
             }
             CGImageDestinationAddImage(destinationData, finalImage, options as CFDictionary)
             if CGImageDestinationFinalize(destinationData) {
@@ -1326,7 +1329,7 @@ struct ContentView: View {
             fileData = rep.representation(using: .png, properties: [:])
         case .tiff:
             fileData = rep.representation(using: .tiff, properties: [:])
-        case .pdf:
+        case .pdf, .avif:
             fileData = nil
         }
         
@@ -1448,7 +1451,7 @@ struct ContentView: View {
                     return 0
                 }
                 
-                // CASE 2: Exporting to non-PDF Image format (JPEG, PNG, HEIC, WEBP, TIFF)
+                // CASE 2: Exporting to non-PDF Image format (JPEG, PNG, HEIC, WEBP, AVIF, TIFF)
                 if let pdfDoc = pdfDoc {
                     let pageCount = pdfDoc.pageCount
                     var totalBytesWritten: Int64 = 0
