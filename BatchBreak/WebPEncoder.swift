@@ -13,7 +13,7 @@ import ImageIO
 import libwebp
 #endif
 
-public enum WebPEncoder {
+public nonisolated enum WebPEncoder {
     
     /// Encodes a CGImage to WebP Data.
     /// - If `libwebp` is linked, uses Google's official encoder for ultra-efficient lossy/lossless compression

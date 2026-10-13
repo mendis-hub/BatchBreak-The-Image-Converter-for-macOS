@@ -22,6 +22,16 @@ final class MainWindowManager: NSObject, NSWindowDelegate {
     // Handler to invoke SwiftUI openWindow for the main window when needed
     var openWindowHandler: (() -> Void)?
     
+    // Queue of pending file URLs to open if main window is loading or transitioning
+    private var pendingURLs: [URL] = []
+    
+    func popPendingFiles() -> [URL]? {
+        guard !pendingURLs.isEmpty else { return nil }
+        let urls = pendingURLs
+        pendingURLs.removeAll()
+        return urls
+    }
+    
     func isMainWindowCandidate(_ window: NSWindow) -> Bool {
         // Exclude utility panels, status bar, and windows that cannot become key
         if window is NSPanel || window.className == "NSStatusBarWindow" || !window.canBecomeKey {
@@ -46,6 +56,25 @@ final class MainWindowManager: NSObject, NSWindowDelegate {
     
     private override init() {
         super.init()
+    }
+    
+    private func createMainWindow() -> NSWindow {
+        let contentView = ContentView()
+            .preferredColorScheme(AppSettings.shared.resolvedColorScheme)
+        let hostingController = NSHostingController(rootView: contentView)
+        
+        let window = NSWindow(contentViewController: hostingController)
+        window.identifier = NSUserInterfaceItemIdentifier("BatchBreakMainWindow")
+        window.title = "BatchBreak"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        window.isMovableByWindowBackground = true
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 600, height: 400)
+        window.setContentSize(NSSize(width: 900, height: 572))
+        window.center()
+        return window
     }
     
     func register(window: NSWindow) {
@@ -76,6 +105,14 @@ final class MainWindowManager: NSObject, NSWindowDelegate {
                     window.orderOut(nil)
                 }
             }
+        } else {
+            activate(window: window)
+            // Deliver any pending files that were queued before window registration
+            if let toDeliver = popPendingFiles(), !toDeliver.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    NotificationCenter.default.post(name: .openWithDroppedFiles, object: toDeliver)
+                }
+            }
         }
     }
     
@@ -99,37 +136,32 @@ final class MainWindowManager: NSObject, NSWindowDelegate {
         }
     }
     
+    func activate(window: NSWindow) {
+        window.alphaValue = 1.0
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        
+        // Elevate window level temporarily so it immediately displays above Finder
+        window.level = .floating
+        window.orderFrontRegardless()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.arrangeInFront(nil)
+        NSRunningApplication.current.activate(options: [.activateAllWindows])
+        NSApp.activate(ignoringOtherApps: true)
+        
+        // Re-assert normal window level after presentation so it behaves as a standard window
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            window.level = .normal
+            window.orderFrontRegardless()
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+    
     func showMainWindow() {
         // While showing and interacting with the main window, ensure regular activation policy
         if NSApp.activationPolicy() != .regular {
             NSApp.setActivationPolicy(.regular)
-        }
-        
-        let activateWindow = { (window: NSWindow) in
-            window.alphaValue = 1.0
-            if window.isMiniaturized {
-                window.deminiaturize(nil)
-            }
-            window.orderFrontRegardless()
-            window.makeKeyAndOrderFront(nil)
-            NSRunningApplication.current.activate(options: [.activateAllWindows])
-            if #available(macOS 14.0, *) {
-                NSApp.activate()
-            } else {
-                NSApp.activate(ignoringOtherApps: true)
-            }
-            
-            // Re-assert frontmost order on the next runloop turn once activation policy finishes propagating
-            DispatchQueue.main.async {
-                window.orderFrontRegardless()
-                window.makeKeyAndOrderFront(nil)
-                NSRunningApplication.current.activate(options: [.activateAllWindows])
-                if #available(macOS 14.0, *) {
-                    NSApp.activate()
-                } else {
-                    NSApp.activate(ignoringOtherApps: true)
-                }
-            }
         }
         
         if let window = mainWindow, isMainWindowCandidate(window) {
@@ -140,7 +172,7 @@ final class MainWindowManager: NSObject, NSWindowDelegate {
                     otherWindow.close()
                 }
             }
-            activateWindow(window)
+            activate(window: window)
             return
         }
         
@@ -164,22 +196,27 @@ final class MainWindowManager: NSObject, NSWindowDelegate {
         }
         
         if let window = foundMain {
-            activateWindow(window)
+            activate(window: window)
         } else {
-            // Request SwiftUI to open the main window if available
-            if let openHandler = openWindowHandler {
-                openHandler()
-            }
-            // Broadcast notification in case SwiftUI can handle reopening
-            NotificationCenter.default.post(name: .openMainWindow, object: nil)
+            // No main window exists yet (e.g. cold launch via Finder context menu / Service)
+            // Create and present the main window directly via NSHostingController
+            let window = createMainWindow()
+            register(window: window)
+            activate(window: window)
         }
     }
     
     func openWithFiles(urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        pendingURLs.append(contentsOf: urls)
         showMainWindow()
-        // Allow the window a slight beat to be visible and active before posting files
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NotificationCenter.default.post(name: .openWithDroppedFiles, object: urls)
+        
+        // If window is already registered, deliver after a slight delay
+        if mainWindow != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                guard let self = self, let toDeliver = self.popPendingFiles(), !toDeliver.isEmpty else { return }
+                NotificationCenter.default.post(name: .openWithDroppedFiles, object: toDeliver)
+            }
         }
     }
 }

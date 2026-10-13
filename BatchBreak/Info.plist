@@ -2,6 +2,50 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Supported Images and Files</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.image</string>
+				<string>public.pdf</string>
+				<string>com.adobe.pdf</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Convert with BatchBreak</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>openFilesInBatchBreak</string>
+			<key>NSPortName</key>
+			<string>BatchBreak</string>
+			<key>NSRequiredContext</key>
+			<dict/>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.image</string>
+				<string>public.pdf</string>
+				<string>com.adobe.pdf</string>
+				<string>public.folder</string>
+				<string>public.directory</string>
+				<string>com.adobe.illustrator.ai-image</string>
+				<string>com.adobe.encapsulated-postscript</string>
+				<string>com.adobe.postscript</string>
+			</array>
+		</dict>
+	</array>
 	<key>SUAllowsAutomaticUpdates</key>
 	<true/>
 	<key>SUEnableAutomaticChecks</key>

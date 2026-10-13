@@ -56,6 +56,7 @@ struct ContentView: View {
     @State private var lastDurationText: String = ""
     
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openWindow) private var openWindow
     
     // Grid columns layout matching screenshot (4 adaptive columns)
     private let gridColumns = [
@@ -398,10 +399,16 @@ struct ContentView: View {
             MainWindowManager.shared.showMainWindow()
         }
         .onAppear {
+            MainWindowManager.shared.openWindowHandler = { [openWindow] in
+                openWindow(id: "main")
+            }
             if photos.isEmpty {
                 quality = defaultQuality
             }
             setupKeyboardMonitor()
+            if let pending = MainWindowManager.shared.popPendingFiles(), !pending.isEmpty {
+                addFiles(urls: pending)
+            }
         }
         .onChange(of: defaultQuality) { _, newDefault in
             if photos.isEmpty {
